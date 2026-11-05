@@ -8,9 +8,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Role } from '../../common/enums.js';
-
-const PHONE_PATTERN = /^\+998\d{9}$/;
-const PHONE_MESSAGE = 'phone must look like +998901234567';
+import { PHONE_MESSAGE, PHONE_PATTERN } from '../../common/validation.js';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Demo Kafe' })

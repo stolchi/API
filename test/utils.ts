@@ -1,20 +1,24 @@
 import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import * as argon2 from 'argon2';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
+import type { Role } from '../src/common/enums.js';
 import { loadEnvFile } from '../src/database/database.config.js';
+import { User } from '../src/database/entities/index.js';
 
 export const API = '/api/v1';
 export const PASSWORD = 'correct-horse-battery';
 
-export async function createTestApp(): Promise<INestApplication> {
+export async function createTestApp(): Promise<NestExpressApplication> {
   loadEnvFile();
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
-  const app = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app);
   await app.init();
 
@@ -67,5 +71,63 @@ export async function registerCafe(
     phone,
     cafeId: response.body.user.cafeId,
     userId: response.body.user.id,
+  };
+}
+
+/** Creates a staff user directly and signs them in. */
+export async function loginAs(
+  app: INestApplication,
+  role: Role,
+  cafeId: string | null,
+): Promise<string> {
+  const phone = nextPhone();
+  await app.get(DataSource).manager.insert(User, {
+    cafeId,
+    name: role,
+    phone,
+    role,
+    passwordHash: await argon2.hash(PASSWORD),
+  });
+  const { body } = await request(app.getHttpServer())
+    .post(`${API}/auth/login`)
+    .send({ phone, password: PASSWORD })
+    .expect(200);
+  return body.accessToken;
+}
+
+export interface Catalog {
+  categoryId: string;
+  osh: { id: string; name: string; price: number };
+  choy: { id: string; name: string; price: number };
+  tableId: string;
+  qrToken: string;
+}
+
+/** One category with two products, and one table. */
+export async function createCatalog(
+  app: INestApplication,
+  token: string,
+): Promise<Catalog> {
+  const post = (path: string, body: object) =>
+    request(app.getHttpServer())
+      .post(`${API}${path}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body)
+      .expect(201);
+
+  const category = await post('/categories', { name: 'Taomlar' });
+  const product = async (name: string, price: number) =>
+    (await post('/products', { categoryId: category.body.id, name, price }))
+      .body;
+  const osh = await product('Osh', 45000);
+  const choy = await product('Choy', 5000);
+  const table = await post('/tables', { name: 'Stol 1' });
+
+  return {
+    categoryId: category.body.id,
+    osh,
+    choy,
+    tableId: table.body.id,
+    qrToken: table.body.qrToken,
   };
 }

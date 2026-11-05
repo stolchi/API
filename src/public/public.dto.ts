@@ -1,0 +1,139 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { OrderStatus, OrderType } from '../common/enums.js';
+import { OrderContentDto } from '../orders/orders.dto.js';
+
+export class CreatePublicOrderDto extends OrderContentDto {
+  @ApiProperty({ enum: [OrderType.DINE_IN, OrderType.TAKEAWAY] })
+  @IsIn([OrderType.DINE_IN, OrderType.TAKEAWAY])
+  type!: OrderType;
+
+  @ApiPropertyOptional({
+    description: "The scanned table's token. Required for DINE_IN.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  qrToken?: string;
+}
+
+export class PublicCafeDto {
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty()
+  slug!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  logoUrl!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  primaryColor!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  phone!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  address!: string | null;
+
+  @ApiProperty({
+    type: 'object',
+    nullable: true,
+    additionalProperties: true,
+  })
+  workingHours!: Record<string, unknown> | null;
+
+  @ApiProperty()
+  currency!: string;
+}
+
+export class PublicProductDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  description!: string | null;
+
+  @ApiProperty({ description: "Whole so'm." })
+  price!: number;
+
+  @ApiProperty({ type: String, nullable: true })
+  imageUrl!: string | null;
+
+  @ApiProperty({ description: 'Unavailable products are shown greyed out.' })
+  isAvailable!: boolean;
+}
+
+export class PublicCategoryDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ type: [PublicProductDto] })
+  products!: PublicProductDto[];
+}
+
+export class PublicMenuDto {
+  @ApiProperty({ type: PublicCafeDto })
+  cafe!: PublicCafeDto;
+
+  @ApiProperty({ type: [PublicCategoryDto] })
+  categories!: PublicCategoryDto[];
+}
+
+export class PublicTableDto {
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty()
+  cafeSlug!: string;
+
+  @ApiProperty()
+  cafeName!: string;
+}
+
+export class PublicOrderItemDto {
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty()
+  price!: number;
+
+  @ApiProperty()
+  quantity!: number;
+
+  @ApiProperty({ type: String, nullable: true })
+  note!: string | null;
+}
+
+/** All a holder of the public token may see: no customer details, staff or payments. */
+export class PublicOrderDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Use for the status page and the socket connection.',
+  })
+  publicToken!: string;
+
+  @ApiProperty()
+  number!: number;
+
+  @ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus' })
+  status!: OrderStatus;
+
+  @ApiProperty({ enum: OrderType, enumName: 'OrderType' })
+  type!: OrderType;
+
+  @ApiProperty()
+  total!: number;
+
+  @ApiProperty()
+  createdAt!: Date;
+
+  @ApiProperty({ type: [PublicOrderItemDto] })
+  items!: PublicOrderItemDto[];
+}

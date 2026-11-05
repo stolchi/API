@@ -1,7 +1,18 @@
-import { Check, Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
+import {
+  Check,
+  Column,
+  Entity,
+  Generated,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+} from 'typeorm';
 import type { Relation } from 'typeorm';
 import { OrderSource, OrderStatus, OrderType } from '../../common/enums.js';
 import { CafeTable } from './cafe-table.entity.js';
+import { OrderItem } from './order-item.entity.js';
+import { Payment } from './payment.entity.js';
 import { TenantEntity } from './tenant.entity.js';
 import { User } from './user.entity.js';
 
@@ -60,6 +71,13 @@ export class Order extends TenantEntity {
 
   /** Lets a customer follow one order without an account. */
   @Index({ unique: true })
-  @Column({ type: 'uuid', default: () => 'gen_random_uuid()' })
+  @Column({ type: 'uuid' })
+  @Generated('uuid')
   publicToken!: string;
+
+  @OneToMany(() => OrderItem, (item) => item.order)
+  items?: Relation<OrderItem>[];
+
+  @OneToMany(() => Payment, (payment) => payment.order)
+  payments?: Relation<Payment>[];
 }

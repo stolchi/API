@@ -1,5 +1,6 @@
 import {
   ArgumentsHost,
+  BadRequestException,
   Catch,
   ExceptionFilter,
   HttpException,
@@ -8,13 +9,18 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { STATUS_CODES } from 'node:http';
+import { QueryFailedError } from 'typeorm';
+
+// not_null_violation, check_violation: e.g. PATCH { "name": null }.
+const INVALID_VALUE_CODES = new Set(['23502', '23514']);
 
 /** Gives every failed request the shape described by `ErrorResponseDto`. */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
-  catch(exception: unknown, host: ArgumentsHost): void {
+  catch(thrown: unknown, host: ArgumentsHost): void {
+    const exception = this.normalize(thrown);
     const http = host.switchToHttp();
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();
@@ -39,6 +45,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
       path: request.originalUrl,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private normalize(thrown: unknown): unknown {
+    if (
+      thrown instanceof QueryFailedError &&
+      INVALID_VALUE_CODES.has(
+        (thrown.driverError as { code?: string }).code ?? '',
+      )
+    ) {
+      return new BadRequestException('A value is missing or not allowed');
+    }
+    return thrown;
   }
 
   private messageOf(exception: unknown, statusCode: number): string | string[] {

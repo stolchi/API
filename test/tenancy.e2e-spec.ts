@@ -1,15 +1,13 @@
 import type { INestApplication } from '@nestjs/common';
-import * as argon2 from 'argon2';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { Role } from '../src/common/enums.js';
 import { TenantRepository } from '../src/common/tenancy/tenant-repository.js';
-import { Category, User } from '../src/database/entities/index.js';
+import { Category } from '../src/database/entities/index.js';
 import {
   API,
   createTestApp,
-  nextPhone,
-  PASSWORD,
+  loginAs,
   registerCafe,
   resetDatabase,
   type RegisteredCafe,
@@ -27,22 +25,6 @@ describe('Multi-tenancy (e2e)', () => {
     http().get(`${API}${path}`).set('Authorization', `Bearer ${cafe.token}`);
   const categories = () => app.get(DataSource).getRepository(Category);
   const tenant = () => new TenantRepository(categories());
-
-  async function loginAs(role: Role, cafeId: string | null): Promise<string> {
-    const phone = nextPhone();
-    await app.get(DataSource).manager.insert(User, {
-      cafeId,
-      name: role,
-      phone,
-      role,
-      passwordHash: await argon2.hash(PASSWORD),
-    });
-    const { body } = await http()
-      .post(`${API}/auth/login`)
-      .send({ phone, password: PASSWORD })
-      .expect(200);
-    return body.accessToken;
-  }
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -109,7 +91,7 @@ describe('Multi-tenancy (e2e)', () => {
 
   describe('roles', () => {
     it('lets a cashier of the cafe in', async () => {
-      const token = await loginAs(Role.CASHIER, cafeA.cafeId);
+      const token = await loginAs(app, Role.CASHIER, cafeA.cafeId);
       const { body } = await http()
         .get(`${API}/categories`)
         .set('Authorization', `Bearer ${token}`)
@@ -118,7 +100,7 @@ describe('Multi-tenancy (e2e)', () => {
     });
 
     it('keeps a cook out of a route not meant for the kitchen', async () => {
-      const token = await loginAs(Role.COOK, cafeA.cafeId);
+      const token = await loginAs(app, Role.COOK, cafeA.cafeId);
       await http()
         .get(`${API}/categories`)
         .set('Authorization', `Bearer ${token}`)
@@ -126,7 +108,7 @@ describe('Multi-tenancy (e2e)', () => {
     });
 
     it('refuses cafe-scoped routes to a super admin, who has no cafe', async () => {
-      const token = await loginAs(Role.SUPER_ADMIN, null);
+      const token = await loginAs(app, Role.SUPER_ADMIN, null);
       await http()
         .get(`${API}/cafes/current`)
         .set('Authorization', `Bearer ${token}`)

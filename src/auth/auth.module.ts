@@ -22,6 +22,7 @@ import { AuthService } from './auth.service.js';
     }),
   ],
   controllers: [AuthController],
+  exports: [JwtModule],
   providers: [
     AuthService,
     // Order matters: authenticate first, then check roles.

@@ -5,6 +5,7 @@ const REQUIRED = [
   'DATABASE_NAME',
   'JWT_ACCESS_SECRET',
   'CORS_ORIGINS',
+  'MENU_APP_URL',
 ] as const;
 
 /** Fails at startup rather than on the first request that needs a missing value. */

@@ -5,6 +5,7 @@ import type {
   FindOneOptions,
   FindOptionsWhere,
   Repository,
+  SelectQueryBuilder,
   UpdateResult,
 } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity.js';
@@ -48,6 +49,20 @@ export class CafeScope<T extends TenantEntity> {
     });
   }
 
+  findAndCount(options: FindManyOptions<T> = {}): Promise<[T[], number]> {
+    return this.repository.findAndCount({
+      ...options,
+      where: this.scope(options.where),
+    });
+  }
+
+  /** For aggregates. Add conditions with `andWhere`: `where` would drop the cafe filter. */
+  queryBuilder(alias: string): SelectQueryBuilder<T> {
+    return this.repository
+      .createQueryBuilder(alias)
+      .where(`${alias}.cafeId = :tenantCafeId`, { tenantCafeId: this.cafeId });
+  }
+
   count(where?: Where<T>): Promise<number> {
     return this.repository.count({ where: this.scope(where) });
   }
@@ -65,8 +80,14 @@ export class CafeScope<T extends TenantEntity> {
     patch: QueryDeepPartialEntity<T>,
   ): Promise<UpdateResult> {
     // A row cannot be moved to another cafe, whatever the caller passes in.
-    const safePatch = { ...patch } as Record<string, unknown>;
-    delete safePatch.cafeId;
+    const safePatch = Object.fromEntries(
+      Object.entries(patch).filter(
+        ([key, value]) => key !== 'cafeId' && value !== undefined,
+      ),
+    );
+    if (Object.keys(safePatch).length === 0) {
+      return Promise.resolve({ raw: [], affected: 0, generatedMaps: [] });
+    }
     return this.repository.update(
       this.scopeOne(where),
       safePatch as QueryDeepPartialEntity<T>,

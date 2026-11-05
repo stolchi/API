@@ -13,7 +13,7 @@ export class OrderItem extends AppBaseEntity {
   @Column({ type: 'uuid' })
   orderId!: string;
 
-  @ManyToOne(() => Order, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Order, (order) => order.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'orderId' })
   order?: Relation<Order>;
 
