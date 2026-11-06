@@ -43,7 +43,7 @@ describe('Auth (e2e)', () => {
       expect(response.body.user).toMatchObject({
         name: 'Aziz',
         phone,
-        role: 'OWNER',
+        role: { systemKey: 'OWNER' },
       });
       expect(response.body.accessToken).toEqual(expect.any(String));
       expect(JSON.stringify(response.body)).not.toContain('passwordHash');
@@ -181,7 +181,11 @@ describe('Auth (e2e)', () => {
         .get(`${API}/auth/me`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
-      expect(body).toMatchObject({ id: userId, role: 'OWNER' });
+      expect(body).toMatchObject({
+        id: userId,
+        role: { systemKey: 'OWNER' },
+      });
+      expect(body.permissions).toContain('STAFF_MANAGE');
       expect(body).not.toHaveProperty('passwordHash');
     });
 

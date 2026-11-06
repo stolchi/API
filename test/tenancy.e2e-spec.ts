@@ -108,7 +108,7 @@ describe('Multi-tenancy (e2e)', () => {
     });
 
     it('refuses cafe-scoped routes to a super admin, who has no cafe', async () => {
-      const token = await loginAs(app, Role.SUPER_ADMIN, null);
+      const token = await loginAs(app, 'SUPER_ADMIN', null);
       await http()
         .get(`${API}/cafes/current`)
         .set('Authorization', `Bearer ${token}`)

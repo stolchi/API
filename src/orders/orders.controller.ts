@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
@@ -18,27 +19,35 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { AuthUser } from '../common/auth/auth-user.js';
-import { CurrentCafe, CurrentUser, Roles } from '../common/auth/decorators.js';
-import { OrderSource, OrderStatus, Role } from '../common/enums.js';
+import {
+  CurrentCafe,
+  CurrentUser,
+  RequireAny,
+} from '../common/auth/decorators.js';
+import { OrderSource, OrderStatus } from '../common/enums.js';
+import { Permission } from '../common/permissions.js';
 import {
   AddPaymentDto,
+  AddPaymentsDto,
   ChangeStatusDto,
   CreateOrderDto,
   ListOrdersQueryDto,
+  MoveOrderDto,
   OrderDto,
   OrderPageDto,
+  UpdateOrderItemsDto,
 } from './orders.dto.js';
 import { OrdersService, toOrderDto } from './orders.service.js';
 
 @ApiTags('orders')
 @ApiBearerAuth()
-@Roles(Role.OWNER, Role.CASHIER, Role.WAITER, Role.COOK)
+@RequireAny(Permission.ORDERS_VIEW, Permission.KITCHEN_WORK)
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Post()
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  @RequireAny(Permission.ORDERS_CREATE)
   @ApiOperation({ summary: 'Create an order from the POS' })
   @ApiCreatedResponse({ type: OrderDto })
   async create(
@@ -58,9 +67,10 @@ export class OrdersController {
   @ApiOkResponse({ type: OrderPageDto })
   list(
     @CurrentCafe() cafeId: string,
+    @CurrentUser() user: AuthUser,
     @Query() query: ListOrdersQueryDto,
   ): Promise<OrderPageDto> {
-    return this.orders.list(cafeId, query);
+    return this.orders.list(cafeId, query, user.id);
   }
 
   @Get(':id')
@@ -81,12 +91,36 @@ export class OrdersController {
     @Body() dto: ChangeStatusDto,
   ): Promise<OrderDto> {
     return toOrderDto(
-      await this.orders.changeStatus(cafeId, id, dto.status, user.role),
+      await this.orders.changeStatus(cafeId, id, dto.status, user.permissions),
     );
   }
 
+  @Put(':id/items')
+  @RequireAny(Permission.ORDERS_EDIT)
+  @ApiOperation({ summary: 'Change what is on an order in progress' })
+  @ApiOkResponse({ type: OrderDto })
+  async updateItems(
+    @CurrentCafe() cafeId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateOrderItemsDto,
+  ): Promise<OrderDto> {
+    return toOrderDto(await this.orders.updateItems(cafeId, id, dto.items));
+  }
+
+  @Patch(':id/table')
+  @RequireAny(Permission.ORDERS_EDIT)
+  @ApiOperation({ summary: 'Move a dine-in order to another table' })
+  @ApiOkResponse({ type: OrderDto })
+  async moveToTable(
+    @CurrentCafe() cafeId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MoveOrderDto,
+  ): Promise<OrderDto> {
+    return toOrderDto(await this.orders.moveToTable(cafeId, id, dto.tableId));
+  }
+
   @Post(':id/cancel')
-  @Roles(Role.OWNER, Role.CASHIER)
+  @RequireAny(Permission.ORDERS_CANCEL)
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: OrderDto })
   async cancel(
@@ -99,13 +133,13 @@ export class OrdersController {
         cafeId,
         id,
         OrderStatus.CANCELLED,
-        user.role,
+        user.permissions,
       ),
     );
   }
 
   @Post(':id/payments')
-  @Roles(Role.OWNER, Role.CASHIER)
+  @RequireAny(Permission.ORDERS_PAYMENT)
   @ApiCreatedResponse({ type: OrderDto })
   async addPayment(
     @CurrentCafe() cafeId: string,
@@ -113,12 +147,28 @@ export class OrdersController {
     @Body() dto: AddPaymentDto,
   ): Promise<OrderDto> {
     return toOrderDto(
-      await this.orders.addPayment(cafeId, id, dto.method, dto.amount),
+      await this.orders.addPayments(cafeId, id, [
+        { method: dto.method, amount: dto.amount },
+      ]),
     );
   }
 
+  @Post(':id/payments/batch')
+  @RequireAny(Permission.ORDERS_PAYMENT)
+  @ApiOperation({
+    summary: 'Take several payments at once, e.g. cash and card',
+  })
+  @ApiCreatedResponse({ type: OrderDto })
+  async addPayments(
+    @CurrentCafe() cafeId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddPaymentsDto,
+  ): Promise<OrderDto> {
+    return toOrderDto(await this.orders.addPayments(cafeId, id, dto.payments));
+  }
+
   @Post(':id/close')
-  @Roles(Role.OWNER, Role.CASHIER)
+  @RequireAny(Permission.ORDERS_PAYMENT)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Close a served, fully paid order' })
   @ApiOkResponse({ type: OrderDto })
@@ -128,7 +178,12 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<OrderDto> {
     return toOrderDto(
-      await this.orders.changeStatus(cafeId, id, OrderStatus.PAID, user.role),
+      await this.orders.changeStatus(
+        cafeId,
+        id,
+        OrderStatus.PAID,
+        user.permissions,
+      ),
     );
   }
 }

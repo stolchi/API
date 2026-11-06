@@ -36,4 +36,8 @@ export class OrderItem extends AppBaseEntity {
 
   @Column({ type: 'text', nullable: true })
   note!: string | null;
+
+  /** How much of `quantity` was added after cooking began, until the order is ready again. */
+  @Column({ type: 'integer', default: 0 })
+  addedQuantity!: number;
 }

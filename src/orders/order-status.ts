@@ -1,4 +1,5 @@
-import { OrderStatus, Role } from '../common/enums.js';
+import { OrderStatus } from '../common/enums.js';
+import { Permission } from '../common/permissions.js';
 
 const { NEW, ACCEPTED, COOKING, READY, SERVED, PAID, CANCELLED } = OrderStatus;
 
@@ -17,16 +18,20 @@ export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   return TRANSITIONS[from].includes(to);
 }
 
-const ALL = Object.values(OrderStatus);
-
-/** The statuses each role may move an order to. */
-const ROLE_TARGETS: Partial<Record<Role, readonly OrderStatus[]>> = {
-  [Role.OWNER]: ALL,
-  [Role.CASHIER]: ALL,
-  [Role.WAITER]: [ACCEPTED, SERVED],
-  [Role.COOK]: [ACCEPTED, COOKING, READY],
+/** The permission needed to move an order to each status. */
+const REQUIRED: Partial<Record<OrderStatus, Permission>> = {
+  [ACCEPTED]: Permission.KITCHEN_WORK,
+  [COOKING]: Permission.KITCHEN_WORK,
+  [READY]: Permission.KITCHEN_WORK,
+  [SERVED]: Permission.ORDERS_SERVE,
+  [PAID]: Permission.ORDERS_PAYMENT,
+  [CANCELLED]: Permission.ORDERS_CANCEL,
 };
 
-export function roleMaySetStatus(role: Role, to: OrderStatus): boolean {
-  return ROLE_TARGETS[role]?.includes(to) ?? false;
+export function maySetStatus(
+  permissions: readonly Permission[],
+  to: OrderStatus,
+): boolean {
+  const required = REQUIRED[to];
+  return required !== undefined && permissions.includes(required);
 }

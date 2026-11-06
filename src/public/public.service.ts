@@ -4,26 +4,34 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { OrderSource, OrderType } from '../common/enums.js';
+import { In, MoreThan, Repository } from 'typeorm';
+import { OrderSource, OrderStatus, OrderType } from '../common/enums.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { CafeTable } from '../database/entities/cafe-table.entity.js';
 import { Cafe } from '../database/entities/cafe.entity.js';
 import { Category } from '../database/entities/category.entity.js';
 import { Order } from '../database/entities/order.entity.js';
 import { Product } from '../database/entities/product.entity.js';
+import { displayNumberOf } from '../orders/order-number.js';
 import { OrdersService } from '../orders/orders.service.js';
 import type {
   CreatePublicOrderDto,
   PublicMenuDto,
   PublicOrderDto,
+  PublicScreenDto,
   PublicTableDto,
 } from './public.dto.js';
+
+const { NEW, ACCEPTED, COOKING, READY } = OrderStatus;
+
+/** Long enough for any real order; numbers restart daily, so yesterday's must drop off. */
+const SCREEN_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 function toPublicOrderDto(order: Order): PublicOrderDto {
   return {
     publicToken: order.publicToken,
     number: order.number,
+    displayNumber: displayNumberOf(order),
     status: order.status,
     type: order.type,
     total: order.total,
@@ -42,6 +50,7 @@ export class PublicService {
   private readonly categories: TenantRepository<Category>;
   private readonly products: TenantRepository<Product>;
   private readonly tenantTables: TenantRepository<CafeTable>;
+  private readonly tenantOrders: TenantRepository<Order>;
 
   constructor(
     @InjectRepository(Cafe) private readonly cafes: Repository<Cafe>,
@@ -54,6 +63,7 @@ export class PublicService {
     this.categories = new TenantRepository(categories);
     this.products = new TenantRepository(products);
     this.tenantTables = new TenantRepository(tables);
+    this.tenantOrders = new TenantRepository(orderRows);
   }
 
   async menu(slug: string): Promise<PublicMenuDto> {
@@ -93,6 +103,27 @@ export class PublicService {
             isAvailable: product.isAvailable,
           })),
       })),
+    };
+  }
+
+  async screen(slug: string): Promise<PublicScreenDto> {
+    const cafe = await this.cafeBySlug(slug);
+    const orders = await this.tenantOrders.forCafe(cafe.id).find({
+      select: { number: true, source: true, status: true },
+      where: {
+        status: In([NEW, ACCEPTED, COOKING, READY]),
+        createdAt: MoreThan(new Date(Date.now() - SCREEN_WINDOW_MS)),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    const numbersWhere = (wanted: (status: OrderStatus) => boolean) =>
+      orders.filter(({ status }) => wanted(status)).map(displayNumberOf);
+    return {
+      cafeName: cafe.name,
+      logoUrl: cafe.logoUrl,
+      primaryColor: cafe.primaryColor,
+      preparing: numbersWhere((status) => status !== READY),
+      ready: numbersWhere((status) => status === READY),
     };
   }
 

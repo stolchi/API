@@ -9,6 +9,7 @@ import {
   DataSource,
   EntityManager,
   In,
+  Not,
   type EntityTarget,
   type FindOptionsWhere,
 } from 'typeorm';
@@ -18,8 +19,8 @@ import {
   OrderStatus,
   OrderType,
   PaymentMethod,
-  Role,
 } from '../common/enums.js';
+import { Permission } from '../common/permissions.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { MAX_MONEY } from '../common/validation.js';
 import { CafeTable } from '../database/entities/cafe-table.entity.js';
@@ -29,12 +30,14 @@ import { Payment } from '../database/entities/payment.entity.js';
 import { Product } from '../database/entities/product.entity.js';
 import type { TenantEntity } from '../database/entities/tenant.entity.js';
 import { RealtimeGateway } from '../realtime/realtime.gateway.js';
-import { canTransition, roleMaySetStatus } from './order-status.js';
+import { displayNumberOf } from './order-number.js';
+import { canTransition, maySetStatus } from './order-status.js';
 import type {
   CreateOrderItemDto,
   ListOrdersQueryDto,
   OrderDto,
   OrderPageDto,
+  UpdateOrderItemDto,
 } from './orders.dto.js';
 
 export interface CreateOrderInput {
@@ -48,6 +51,15 @@ export interface CreateOrderInput {
   createdById?: string;
 }
 
+const FINISHED = [OrderStatus.PAID, OrderStatus.CANCELLED];
+
+/** Once the kitchen has started, whatever is added must reach it as something new. */
+const STARTED: readonly OrderStatus[] = [
+  OrderStatus.COOKING,
+  OrderStatus.READY,
+  OrderStatus.SERVED,
+];
+
 function paidAmountOf(order: Order): number {
   return (order.payments ?? []).reduce((sum, p) => sum + p.amount, 0);
 }
@@ -56,6 +68,7 @@ export function toOrderDto(order: Order): OrderDto {
   return {
     id: order.id,
     number: order.number,
+    displayNumber: displayNumberOf(order),
     businessDate: order.businessDate,
     source: order.source,
     type: order.type,
@@ -76,6 +89,7 @@ export function toOrderDto(order: Order): OrderDto {
       price: item.priceSnapshot,
       quantity: item.quantity,
       note: item.note,
+      addedQuantity: item.addedQuantity,
     })),
     payments: (order.payments ?? []).map((payment) => ({
       id: payment.id,
@@ -117,6 +131,12 @@ export class OrdersService {
         number: await this.nextNumber(manager, cafeId, businessDate),
         businessDate,
         source: input.source,
+        // A Telegram order is a delivery, which someone confirms by phone first.
+        // Orders from staff or a table's QR go straight to work.
+        status:
+          input.source === OrderSource.TELEGRAM
+            ? OrderStatus.NEW
+            : OrderStatus.ACCEPTED,
         type: input.type,
         tableId: input.tableId ?? null,
         total,
@@ -140,11 +160,25 @@ export class OrdersService {
 
   async list(
     cafeId: string,
-    { date, status, source, tableId, page, limit }: ListOrdersQueryDto,
+    {
+      date,
+      status,
+      active,
+      mine,
+      source,
+      tableId,
+      page,
+      limit,
+    }: ListOrdersQueryDto,
+    userId?: string,
   ): Promise<OrderPageDto> {
     const where: FindOptionsWhere<Order> = {
       ...(date && { businessDate: date }),
+      ...(active !== undefined && {
+        status: active ? Not(In(FINISHED)) : In(FINISHED),
+      }),
       ...(status && { status }),
+      ...(mine && userId && { createdById: userId }),
       ...(source && { source }),
       ...(tableId && { tableId }),
     };
@@ -155,7 +189,11 @@ export class OrdersService {
     ).findAndCount({
       where,
       relations: { items: true, payments: true },
-      order: { createdAt: 'DESC', number: 'DESC' },
+      order: {
+        createdAt: 'DESC',
+        number: 'DESC',
+        items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
+      },
       skip: (page - 1) * limit,
       take: limit,
     });
@@ -171,9 +209,10 @@ export class OrdersService {
     cafeId: string,
     id: string,
     to: OrderStatus,
-    role: Role,
+    permissions: readonly Permission[],
   ): Promise<Order> {
-    if (!roleMaySetStatus(role, to)) {
+    // Nothing ever goes back to NEW: that is a conflict below, whoever is asking.
+    if (to !== OrderStatus.NEW && !maySetStatus(permissions, to)) {
       throw new ForbiddenException(`Your role cannot set an order to ${to}`);
     }
 
@@ -190,7 +229,20 @@ export class OrdersService {
           throw new ConflictException('The order is not fully paid yet');
         }
       }
+      // Money already taken is only for someone who handles money to undo.
+      if (
+        to === OrderStatus.CANCELLED &&
+        !permissions.includes(Permission.ORDERS_PAYMENT) &&
+        (await this.paidSoFar(manager, id)) > 0
+      ) {
+        throw new ForbiddenException(
+          'An order with payments can only be cancelled by someone who takes payments',
+        );
+      }
       await this.scope(manager, cafeId, Order).update({ id }, { status: to });
+      if (to === OrderStatus.READY) {
+        await manager.update(OrderItem, { orderId: id }, { addedQuantity: 0 });
+      }
     });
 
     const order = await this.load(this.dataSource.manager, cafeId, id);
@@ -202,11 +254,167 @@ export class OrdersService {
     return order;
   }
 
-  async addPayment(
+  /**
+   * Replaces the lines of an order in progress. Food added after cooking began goes
+   * back to the kitchen, even from READY or SERVED: nobody would cook it otherwise.
+   * That is the one step backwards an order can take, so it is not in `canTransition`.
+   */
+  async updateItems(
     cafeId: string,
     id: string,
-    method: PaymentMethod,
-    amount: number,
+    lines: UpdateOrderItemDto[],
+  ): Promise<Order> {
+    const { before, added } = await this.dataSource.transaction(
+      async (manager) => {
+        const order = await this.lock(manager, cafeId, id);
+        if (
+          order.status === OrderStatus.PAID ||
+          order.status === OrderStatus.CANCELLED
+        ) {
+          throw new ConflictException(
+            `A ${order.status} order cannot be changed`,
+          );
+        }
+        const started = STARTED.includes(order.status);
+        const existing = await manager.find(OrderItem, {
+          where: { orderId: id },
+        });
+        const byId = new Map(existing.map((item) => [item.id, item]));
+
+        const keptIds = lines.flatMap((line) => (line.id ? [line.id] : []));
+        if (new Set(keptIds).size !== keptIds.length) {
+          throw new BadRequestException('An order line was sent twice');
+        }
+
+        const fresh: CreateOrderItemDto[] = [];
+        const kept: (OrderItem & { next: UpdateOrderItemDto })[] = [];
+        for (const line of lines) {
+          if (line.id) {
+            const item = byId.get(line.id);
+            if (!item) throw new BadRequestException('Unknown order line');
+            kept.push(Object.assign(item, { next: line }));
+          } else if (line.productId) {
+            fresh.push({
+              productId: line.productId,
+              quantity: line.quantity,
+              note: line.note,
+            });
+          } else {
+            throw new BadRequestException('A new line needs a product');
+          }
+        }
+        const priced = await this.priceItems(manager, cafeId, fresh);
+
+        const total =
+          kept.reduce((sum, i) => sum + i.priceSnapshot * i.next.quantity, 0) +
+          priced.reduce((sum, i) => sum + i.priceSnapshot * i.quantity, 0);
+        if (total > MAX_MONEY) {
+          throw new BadRequestException('Order is too large');
+        }
+        if (total < (await this.paidSoFar(manager, id))) {
+          throw new ConflictException(
+            'The order cannot cost less than what has been paid',
+          );
+        }
+
+        const keptSet = new Set(keptIds);
+        const removed = existing.filter((item) => !keptSet.has(item.id));
+        if (removed.length > 0) {
+          await manager.delete(
+            OrderItem,
+            removed.map((item) => item.id),
+          );
+        }
+
+        let added = 0;
+        for (const item of kept) {
+          const growth = Math.max(0, item.next.quantity - item.quantity);
+          if (started) added += growth;
+          await manager.update(
+            OrderItem,
+            { id: item.id, orderId: id },
+            {
+              quantity: item.next.quantity,
+              note: item.next.note ?? null,
+              addedQuantity: started
+                ? Math.min(item.addedQuantity + growth, item.next.quantity)
+                : 0,
+            },
+          );
+        }
+        if (priced.length > 0) {
+          await manager.insert(
+            OrderItem,
+            priced.map((item) => ({
+              ...item,
+              orderId: id,
+              addedQuantity: started ? item.quantity : 0,
+            })),
+          );
+          if (started) {
+            added += priced.reduce((sum, item) => sum + item.quantity, 0);
+          }
+        }
+
+        const backToKitchen =
+          added > 0 &&
+          (order.status === OrderStatus.READY ||
+            order.status === OrderStatus.SERVED);
+        await this.scope(manager, cafeId, Order).update(
+          { id },
+          { total, ...(backToKitchen && { status: OrderStatus.COOKING }) },
+        );
+        return { before: order.status, added };
+      },
+    );
+
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    const dto = toOrderDto(order);
+    this.realtime.emitOrderUpdated(cafeId, dto);
+    if (order.status !== before) {
+      this.realtime.emitOrderStatusChanged(cafeId, dto, {
+        id: order.id,
+        number: order.number,
+        status: order.status,
+      });
+    }
+    if (added > 0) this.realtime.emitOrderItemsAdded(cafeId, dto);
+    return order;
+  }
+
+  async moveToTable(
+    cafeId: string,
+    id: string,
+    tableId: string,
+  ): Promise<Order> {
+    await this.dataSource.transaction(async (manager) => {
+      const order = await this.lock(manager, cafeId, id);
+      if (
+        order.status === OrderStatus.PAID ||
+        order.status === OrderStatus.CANCELLED
+      ) {
+        throw new ConflictException(`A ${order.status} order cannot be moved`);
+      }
+      if (order.type !== OrderType.DINE_IN) {
+        throw new ConflictException('Only a DINE_IN order can change tables');
+      }
+      const tables = await this.scope(manager, cafeId, CafeTable).count({
+        id: tableId,
+      });
+      if (tables === 0) throw new BadRequestException('Unknown table');
+      await this.scope(manager, cafeId, Order).update({ id }, { tableId });
+    });
+
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    this.realtime.emitOrderUpdated(cafeId, toOrderDto(order));
+    return order;
+  }
+
+  /** One order paid several ways at once is recorded whole, or not at all. */
+  async addPayments(
+    cafeId: string,
+    id: string,
+    payments: readonly { method: PaymentMethod; amount: number }[],
   ): Promise<Order> {
     await this.dataSource.transaction(async (manager) => {
       const order = await this.lock(manager, cafeId, id);
@@ -219,12 +427,20 @@ export class OrdersService {
         );
       }
       const unpaid = order.total - (await this.paidSoFar(manager, id));
+      const amount = payments.reduce((sum, item) => sum + item.amount, 0);
       if (amount > unpaid) {
         throw new BadRequestException(
           `The payment exceeds the unpaid amount of ${unpaid}`,
         );
       }
-      await manager.insert(Payment, { orderId: id, method, amount });
+      await manager.insert(
+        Payment,
+        payments.map((item) => ({
+          orderId: id,
+          method: item.method,
+          amount: item.amount,
+        })),
+      );
     });
 
     const order = await this.load(this.dataSource.manager, cafeId, id);

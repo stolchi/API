@@ -12,6 +12,7 @@ import {
   CreatePublicOrderDto,
   PublicMenuDto,
   PublicOrderDto,
+  PublicScreenDto,
   PublicTableDto,
 } from './public.dto.js';
 import { PublicService } from './public.service.js';
@@ -27,6 +28,12 @@ export class PublicController {
   @ApiOkResponse({ type: PublicMenuDto })
   menu(@Param('slug') slug: string): Promise<PublicMenuDto> {
     return this.publicApi.menu(slug);
+  }
+
+  @Get('cafes/:slug/screen')
+  @ApiOkResponse({ type: PublicScreenDto })
+  screen(@Param('slug') slug: string): Promise<PublicScreenDto> {
+    return this.publicApi.screen(slug);
   }
 
   @Get('tables/:qrToken')

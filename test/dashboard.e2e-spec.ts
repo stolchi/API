@@ -47,7 +47,7 @@ describe('Dashboard (e2e)', () => {
   }
 
   async function closeOrder(token: string, id: string, total: number) {
-    for (const status of ['ACCEPTED', 'COOKING', 'READY', 'SERVED']) {
+    for (const status of ['COOKING', 'READY', 'SERVED']) {
       await send(token, 'patch', `/orders/${id}/status`)
         .send({ status })
         .expect(200);

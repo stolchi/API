@@ -8,6 +8,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Role } from '../../common/enums.js';
+import { Permission } from '../../common/permissions.js';
 import { PHONE_MESSAGE, PHONE_PATTERN } from '../../common/validation.js';
 
 export class RegisterDto {
@@ -58,6 +59,22 @@ export class LoginDto {
   password!: string;
 }
 
+export class UserRoleDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({
+    enum: Role,
+    enumName: 'Role',
+    nullable: true,
+    description: 'Set on the default roles, empty on a custom one.',
+  })
+  systemKey!: Role | null;
+}
+
 export class UserDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -71,8 +88,14 @@ export class UserDto {
   @ApiProperty()
   phone!: string;
 
-  @ApiProperty({ enum: Role, enumName: 'Role' })
-  role!: Role;
+  @ApiProperty()
+  isSuperAdmin!: boolean;
+
+  @ApiProperty({ type: UserRoleDto, nullable: true })
+  role!: UserRoleDto | null;
+
+  @ApiProperty({ enum: Permission, enumName: 'Permission', isArray: true })
+  permissions!: Permission[];
 }
 
 export class AuthResponseDto {

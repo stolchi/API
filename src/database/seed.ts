@@ -3,8 +3,16 @@ import * as argon2 from 'argon2';
 import { randomBytes } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { Role } from '../common/enums.js';
+import { DEFAULT_ROLES } from '../common/permissions.js';
 import { buildDataSourceOptions, loadEnvFile } from './database.config.js';
-import { Cafe, CafeTable, Category, Product, User } from './entities/index.js';
+import {
+  Cafe,
+  CafeTable,
+  Category,
+  Product,
+  StaffRole,
+  User,
+} from './entities/index.js';
 
 const MENU: { category: string; products: [name: string, price: number][] }[] =
   [
@@ -61,7 +69,7 @@ async function main(): Promise<void> {
           name: 'Super Admin',
           phone: '+998900000000',
           passwordHash,
-          role: Role.SUPER_ADMIN,
+          isSuperAdmin: true,
         }),
       );
 
@@ -74,15 +82,28 @@ async function main(): Promise<void> {
       );
       const cafeId = cafe.id;
 
+      const roles = await manager.save(
+        DEFAULT_ROLES.map((role) =>
+          manager.create(StaffRole, { ...role, cafeId }),
+        ),
+      );
+
       await manager.save(
         (
           [
             ['Demo Owner', '+998900000001', Role.OWNER],
             ['Demo Cashier', '+998900000002', Role.CASHIER],
             ['Demo Cook', '+998900000003', Role.COOK],
+            ['Demo Waiter', '+998900000004', Role.WAITER],
           ] as const
-        ).map(([name, phone, role]) =>
-          manager.create(User, { cafeId, name, phone, passwordHash, role }),
+        ).map(([name, phone, systemKey]) =>
+          manager.create(User, {
+            cafeId,
+            name,
+            phone,
+            passwordHash,
+            role: roles.find((role) => role.systemKey === systemKey),
+          }),
         ),
       );
 
@@ -114,7 +135,7 @@ async function main(): Promise<void> {
       );
     });
 
-    console.log('Seeded: 1 super admin, Demo Kafe with 3 users, 3 categories,');
+    console.log('Seeded: 1 super admin, Demo Kafe with 4 users, 3 categories,');
     console.log('10 products and 5 tables. Logins use SEED_PASSWORD.');
   } finally {
     await dataSource.destroy();

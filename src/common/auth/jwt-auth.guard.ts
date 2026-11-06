@@ -6,14 +6,16 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from '../../database/entities/user.entity.js';
+import { permissionsOf } from '../permissions.js';
 import type { AuthenticatedRequest } from './auth-user.js';
-import { Role } from '../enums.js';
 import { IS_PUBLIC_KEY } from './decorators.js';
 
 export interface AccessTokenPayload {
   sub: string;
   cafeId: string | null;
-  role: Role;
 }
 
 /** Global guard: every route requires a valid access token unless marked `@Public()`. */
@@ -22,6 +24,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
+    @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -35,16 +38,26 @@ export class JwtAuthGuard implements CanActivate {
     const [scheme, token] = request.headers.authorization?.split(' ') ?? [];
     if (scheme !== 'Bearer' || !token) throw new UnauthorizedException();
 
+    let payload: AccessTokenPayload;
     try {
-      const payload = await this.jwt.verifyAsync<AccessTokenPayload>(token);
-      request.user = {
-        id: payload.sub,
-        cafeId: payload.cafeId,
-        role: payload.role,
-      };
-      return true;
+      payload = await this.jwt.verifyAsync<AccessTokenPayload>(token);
     } catch {
       throw new UnauthorizedException();
     }
+
+    // Read on every request, not put in the token: taking a permission away or
+    // deactivating someone must not wait for their token to expire.
+    const user = await this.users.findOne({
+      where: { id: payload.sub, isActive: true },
+      relations: { role: true },
+    });
+    if (!user) throw new UnauthorizedException();
+
+    request.user = {
+      id: user.id,
+      cafeId: user.cafeId,
+      permissions: permissionsOf(user.role),
+    };
+    return true;
   }
 }

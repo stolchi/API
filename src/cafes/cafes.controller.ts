@@ -1,47 +1,81 @@
-import { Controller, Get, NotFoundException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+  Put,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOkResponse,
-  ApiProperty,
   ApiTags,
 } from '@nestjs/swagger';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { CurrentCafe } from '../common/auth/decorators.js';
-import { Cafe } from '../database/entities/cafe.entity.js';
+import { CurrentCafe, RequireAny } from '../common/auth/decorators.js';
+import { Permission } from '../common/permissions.js';
+import { CafeDto, SetTelegramBotDto, UpdateCafeDto } from './cafes.dto.js';
+import { CafesService } from './cafes.service.js';
 
-class CafeDto {
-  @ApiProperty({ format: 'uuid' })
-  id!: string;
-
-  @ApiProperty()
-  name!: string;
-
-  @ApiProperty()
-  slug!: string;
-
-  @ApiProperty()
-  currency!: string;
-}
+const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 
 @ApiTags('cafes')
 @ApiBearerAuth()
-@Controller('cafes')
+@Controller('cafes/current')
 export class CafesController {
-  constructor(
-    @InjectRepository(Cafe) private readonly cafes: Repository<Cafe>,
-  ) {}
+  constructor(private readonly cafes: CafesService) {}
 
-  @Get('current')
+  @Get()
   @ApiOkResponse({ type: CafeDto })
-  async current(@CurrentCafe() cafeId: string): Promise<CafeDto> {
-    const cafe = await this.cafes.findOneBy({ id: cafeId });
-    if (!cafe) throw new NotFoundException();
-    return {
-      id: cafe.id,
-      name: cafe.name,
-      slug: cafe.slug,
-      currency: cafe.currency,
-    };
+  current(@CurrentCafe() cafeId: string): Promise<CafeDto> {
+    return this.cafes.current(cafeId);
+  }
+
+  @Patch()
+  @RequireAny(Permission.SETTINGS_MANAGE)
+  @ApiOkResponse({ type: CafeDto })
+  update(
+    @CurrentCafe() cafeId: string,
+    @Body() dto: UpdateCafeDto,
+  ): Promise<CafeDto> {
+    return this.cafes.update(cafeId, dto);
+  }
+
+  @Post('logo')
+  @RequireAny(Permission.SETTINGS_MANAGE)
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_LOGO_BYTES, files: 1 } }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOkResponse({ type: CafeDto })
+  setLogo(
+    @CurrentCafe() cafeId: string,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ): Promise<CafeDto> {
+    return this.cafes.setLogo(cafeId, file);
+  }
+
+  @Put('telegram-bot')
+  @RequireAny(Permission.SETTINGS_MANAGE)
+  @ApiOkResponse({ type: CafeDto })
+  setTelegramBot(
+    @CurrentCafe() cafeId: string,
+    @Body() dto: SetTelegramBotDto,
+  ): Promise<CafeDto> {
+    return this.cafes.setTelegramBot(cafeId, dto.token);
   }
 }

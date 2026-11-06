@@ -5,17 +5,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
-import { CafesController } from './cafes/cafes.controller.js';
+import { CafesModule } from './cafes/cafes.module.js';
 import { CategoriesModule } from './categories/categories.module.js';
 import { AllExceptionsFilter } from './common/http-exception.filter.js';
 import { validateEnv } from './config/env.validation.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { buildDataSourceOptions } from './database/database.config.js';
-import { Cafe } from './database/entities/index.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { PublicModule } from './public/public.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
+import { StaffModule } from './staff/staff.module.js';
 import { TablesModule } from './tables/tables.module.js';
 
 @Module({
@@ -32,17 +32,18 @@ import { TablesModule } from './tables/tables.module.js';
           DATABASE_NAME: config.get('DATABASE_NAME'),
         }),
     }),
-    TypeOrmModule.forFeature([Cafe]),
     AuthModule,
+    CafesModule,
     RealtimeModule,
     CategoriesModule,
     ProductsModule,
     TablesModule,
     OrdersModule,
+    StaffModule,
     PublicModule,
     DashboardModule,
   ],
-  controllers: [AppController, CafesController],
+  controllers: [AppController],
   providers: [
     AppService,
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

@@ -23,8 +23,8 @@ import {
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { CurrentCafe, Roles } from '../common/auth/decorators.js';
-import { Role } from '../common/enums.js';
+import { CurrentCafe, RequireAny } from '../common/auth/decorators.js';
+import { Permission } from '../common/permissions.js';
 import {
   CreateProductDto,
   ListProductsQueryDto,
@@ -36,15 +36,23 @@ import { ProductsService } from './products.service.js';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** Taking or editing an order means picking from the menu. */
+const MENU_READERS = [
+  Permission.MENU_MANAGE,
+  Permission.MENU_AVAILABILITY,
+  Permission.ORDERS_CREATE,
+  Permission.ORDERS_EDIT,
+];
+
 @ApiTags('products')
 @ApiBearerAuth()
-@Roles(Role.OWNER)
+@RequireAny(Permission.MENU_MANAGE)
 @Controller('products')
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get()
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  @RequireAny(...MENU_READERS)
   @ApiOkResponse({ type: [ProductDto] })
   list(
     @CurrentCafe() cafeId: string,
@@ -54,7 +62,7 @@ export class ProductsController {
   }
 
   @Get(':id')
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  @RequireAny(...MENU_READERS)
   @ApiOkResponse({ type: ProductDto })
   get(
     @CurrentCafe() cafeId: string,
@@ -83,7 +91,7 @@ export class ProductsController {
   }
 
   @Patch(':id/availability')
-  @Roles(Role.OWNER, Role.CASHIER)
+  @RequireAny(Permission.MENU_MANAGE, Permission.MENU_AVAILABILITY)
   @ApiOkResponse({ type: ProductDto })
   setAvailability(
     @CurrentCafe() cafeId: string,

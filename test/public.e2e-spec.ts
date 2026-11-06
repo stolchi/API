@@ -47,6 +47,94 @@ describe('Public API (e2e)', () => {
   });
   afterAll(() => app.close());
 
+  describe('customer screen', () => {
+    const status = (id: string, value: string) =>
+      owner('patch', `/orders/${id}/status`)
+        .send({ status: value })
+        .expect(200);
+    const order = async () =>
+      (
+        await owner('post', '/orders')
+          .send({
+            type: 'TAKEAWAY',
+            customerName: 'Sir',
+            customerPhone: '+998901112233',
+            items: [{ productId: a.osh.id, quantity: 1 }],
+          })
+          .expect(201)
+      ).body;
+    const screen = async (slug = 'cafe-a') =>
+      (await http().get(`${API}/public/cafes/${slug}/screen`).expect(200)).body;
+
+    it('shows accepted and cooking orders as one column', async () => {
+      const [accepted, cooking] = [await order(), await order()];
+      await status(cooking.id, 'COOKING');
+      const { preparing, ready } = await screen();
+      expect(preparing).toEqual([
+        accepted.displayNumber,
+        cooking.displayNumber,
+      ]);
+      expect(ready).toEqual([]);
+    });
+
+    it('shows a QR order under the number its customer was given', async () => {
+      const { body } = await placeOrder(
+        'cafe-a',
+        dineIn(a.qrToken, a.osh.id),
+      ).expect(201);
+      expect(body.displayNumber).toBe('Q-1');
+      expect((await screen()).preparing).toEqual(['Q-1']);
+    });
+
+    it('moves a ready order over, and drops it once handed out', async () => {
+      const item = await order();
+      for (const step of ['COOKING', 'READY']) {
+        await status(item.id, step);
+      }
+      expect(await screen()).toMatchObject({
+        preparing: [],
+        ready: [item.displayNumber],
+      });
+      await status(item.id, 'SERVED');
+      expect(await screen()).toMatchObject({ preparing: [], ready: [] });
+    });
+
+    it('drops a cancelled order', async () => {
+      const item = await order();
+      await owner('post', `/orders/${item.id}/cancel`).expect(200);
+      expect((await screen()).preparing).toEqual([]);
+    });
+
+    it('reveals numbers only, nothing about the customer', async () => {
+      const item = await order();
+      const raw = JSON.stringify(await screen());
+      expect(raw).not.toContain('Sir');
+      expect(raw).not.toContain('+998901112233');
+      expect(raw).not.toContain(item.publicToken);
+      expect(raw).not.toContain(item.id);
+    });
+
+    it("does not mix in another cafe's orders", async () => {
+      await order();
+      expect((await screen('cafe-b')).preparing).toEqual([]);
+    });
+
+    it('leaves out orders from a previous shift', async () => {
+      const item = await order();
+      await app
+        .get(DataSource)
+        .query(
+          `UPDATE "orders" SET "createdAt" = now() - interval '13 hours' WHERE "id" = $1`,
+          [item.id],
+        );
+      expect((await screen()).preparing).toEqual([]);
+    });
+
+    it('is not found for an unknown cafe', async () => {
+      await http().get(`${API}/public/cafes/nope/screen`).expect(404);
+    });
+  });
+
   describe('menu', () => {
     it('needs no login and shows only this cafe', async () => {
       const { body } = await http()
@@ -118,7 +206,8 @@ describe('Public API (e2e)', () => {
       ).expect(201);
       expect(body).toMatchObject({
         number: 1,
-        status: 'NEW',
+        displayNumber: 'Q-1',
+        status: 'ACCEPTED',
         type: 'DINE_IN',
         total: 90000,
       });
@@ -202,13 +291,13 @@ describe('Public API (e2e)', () => {
 
       const { body: staff } = await owner('get', '/orders').expect(200);
       await owner('patch', `/orders/${staff.items[0].id}/status`)
-        .send({ status: 'ACCEPTED' })
+        .send({ status: 'COOKING' })
         .expect(200);
 
       const { body } = await http()
         .get(`${API}/public/orders/${placed.publicToken}`)
         .expect(200);
-      expect(body.status).toBe('ACCEPTED');
+      expect(body.status).toBe('COOKING');
       expect(body.items[0]).toMatchObject({ name: 'Osh', quantity: 2 });
 
       const text = JSON.stringify(body);

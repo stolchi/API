@@ -5,9 +5,11 @@ import request from 'supertest';
 import { Role } from '../src/common/enums.js';
 import {
   API,
+  PASSWORD,
   createCatalog,
   createTestApp,
   loginAs,
+  nextPhone,
   registerCafe,
   resetDatabase,
   type Catalog,
@@ -80,6 +82,96 @@ describe('Realtime (e2e)', () => {
   });
   afterAll(() => app.close());
 
+  describe('customer screen', () => {
+    it('is told something changed, and nothing else', async () => {
+      const socket = await connect({ screen: 'cafe-a' });
+      const events = record(socket);
+      await createOrder();
+      await silence();
+      expect(events.map((event) => event.name)).toEqual(['screen.changed']);
+      expect(events[0].data).toBeUndefined();
+    });
+
+    it('hears nothing from another cafe', async () => {
+      const socket = await connect({ screen: 'cafe-b' });
+      const events = record(socket);
+      await createOrder();
+      await silence();
+      expect(events).toEqual([]);
+    });
+
+    it('refuses an unknown cafe', async () => {
+      await expect(connect({ screen: 'no-such-cafe' })).rejects.toThrow(
+        'Unauthorized',
+      );
+    });
+  });
+
+  describe('permissions', () => {
+    it('keeps order events from a role that cannot see orders', async () => {
+      const { body: role } = await staff('post', '/staff/roles')
+        .send({ name: 'Faqat menyu', permissions: ['MENU_MANAGE'] })
+        .expect(201);
+      const phone = nextPhone();
+      await staff('post', '/staff')
+        .send({ name: 'Ali', phone, password: PASSWORD, roleId: role.id })
+        .expect(201);
+      const { body } = await request(app.getHttpServer())
+        .post(`${API}/auth/login`)
+        .send({ phone, password: PASSWORD })
+        .expect(200);
+
+      const socket = await connect({ token: body.accessToken });
+      const events = record(socket);
+      await createOrder();
+      await silence();
+      expect(events).toEqual([]);
+    });
+
+    it('disconnects staff whose role changes, so they reload it', async () => {
+      const { body: role } = await staff('post', '/staff/roles')
+        .send({ name: 'Vaqtincha', permissions: ['ORDERS_VIEW'] })
+        .expect(201);
+      const phone = nextPhone();
+      await staff('post', '/staff')
+        .send({ name: 'Ali', phone, password: PASSWORD, roleId: role.id })
+        .expect(201);
+      const { body } = await request(app.getHttpServer())
+        .post(`${API}/auth/login`)
+        .send({ phone, password: PASSWORD })
+        .expect(200);
+      const socket = await connect({ token: body.accessToken });
+      const gone = next(socket, 'disconnect');
+      await staff('patch', `/staff/roles/${role.id}`)
+        .send({ permissions: [] })
+        .expect(200);
+      expect(await gone).toBe('io server disconnect');
+    });
+
+    it('tells the kitchen about food added to an order', async () => {
+      const { body: order } = await createOrder();
+      for (const status of ['COOKING']) {
+        await staff('patch', `/orders/${order.id}/status`)
+          .send({ status })
+          .expect(200);
+      }
+      const cook = await loginAs(app, Role.COOK, cafeA.cafeId);
+      const socket = await connect({ token: cook });
+      const added = next(socket, 'order.items_added');
+      await request(app.getHttpServer())
+        .put(`${API}/orders/${order.id}/items`)
+        .set('Authorization', `Bearer ${cafeA.token}`)
+        .send({
+          items: [
+            { id: order.items[0].id, quantity: 1 },
+            { productId: a.choy.id, quantity: 2 },
+          ],
+        })
+        .expect(200);
+      expect(await added).toHaveProperty('items');
+    });
+  });
+
   describe('connecting', () => {
     it.each([
       ['no credentials', {}],
@@ -96,7 +188,7 @@ describe('Realtime (e2e)', () => {
     });
 
     it('refuses a super admin, who has no cafe', async () => {
-      const token = await loginAs(app, Role.SUPER_ADMIN, null);
+      const token = await loginAs(app, 'SUPER_ADMIN', null);
       await expect(connect({ token })).rejects.toThrow('Unauthorized');
     });
   });
@@ -133,11 +225,11 @@ describe('Realtime (e2e)', () => {
 
       const changed = next(socket, 'order.status_changed');
       await staff('patch', `/orders/${order.id}/status`)
-        .send({ status: 'ACCEPTED' })
+        .send({ status: 'COOKING' })
         .expect(200);
       expect(await changed).toMatchObject({
         id: order.id,
-        status: 'ACCEPTED',
+        status: 'COOKING',
       });
 
       const updated = next(socket, 'order.updated');
@@ -169,7 +261,7 @@ describe('Realtime (e2e)', () => {
       const events = record(socket);
       const { body: order } = await createOrder();
       await staff('patch', `/orders/${order.id}/status`)
-        .send({ status: 'ACCEPTED' })
+        .send({ status: 'COOKING' })
         .expect(200);
       await staff('patch', `/products/${a.osh.id}/availability`)
         .send({ isAvailable: false })
@@ -199,12 +291,12 @@ describe('Realtime (e2e)', () => {
 
       const changed = next(socket, 'order.status_changed');
       await staff('patch', `/orders/${order.id}/status`)
-        .send({ status: 'ACCEPTED' })
+        .send({ status: 'COOKING' })
         .expect(200);
       expect(await changed).toEqual({
         id: order.id,
         number: 1,
-        status: 'ACCEPTED',
+        status: 'COOKING',
       });
     });
 
@@ -215,7 +307,7 @@ describe('Realtime (e2e)', () => {
       const events = record(socket);
 
       await staff('patch', `/orders/${other.id}/status`)
-        .send({ status: 'ACCEPTED' })
+        .send({ status: 'COOKING' })
         .expect(200);
       await staff('post', `/orders/${mine.id}/payments`)
         .send({ method: 'CASH', amount: 1000 })

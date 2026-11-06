@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
@@ -88,6 +89,50 @@ export class CreateOrderDto extends OrderContentDto {
   tableId?: string;
 }
 
+export class UpdateOrderItemDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'A line already on the order, which keeps its price. Leave out to add a new one.',
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Required for a new line.',
+  })
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
+
+  @ApiProperty({ minimum: 1, maximum: 999 })
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  quantity!: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
+export class UpdateOrderItemsDto {
+  @ApiProperty({
+    type: [UpdateOrderItemDto],
+    description: 'The whole new list: lines left out are removed.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => UpdateOrderItemDto)
+  items!: UpdateOrderItemDto[];
+}
+
 export class ListOrdersQueryDto {
   @ApiPropertyOptional({
     example: '2026-01-31',
@@ -113,6 +158,29 @@ export class ListOrdersQueryDto {
   @IsUUID()
   tableId?: string;
 
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'True: only orders still in progress. False: only paid or cancelled ones.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  active?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'Only orders created by the signed-in user.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  mine?: boolean;
+
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -127,6 +195,12 @@ export class ListOrdersQueryDto {
   @Min(1)
   @Max(100)
   limit: number = 50;
+}
+
+export class MoveOrderDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  tableId!: string;
 }
 
 export class ChangeStatusDto {
@@ -148,6 +222,19 @@ export class AddPaymentDto {
   @Min(1)
   @Max(MAX_MONEY)
   amount!: number;
+}
+
+export class AddPaymentsDto {
+  @ApiProperty({
+    type: [AddPaymentDto],
+    description: 'Taken together: either all of them are recorded, or none.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => AddPaymentDto)
+  payments!: AddPaymentDto[];
 }
 
 export class OrderItemDto {
@@ -173,6 +260,12 @@ export class OrderItemDto {
 
   @ApiProperty({ type: String, nullable: true })
   note!: string | null;
+
+  @ApiProperty({
+    description:
+      'How much of the quantity was added after cooking began, until ready again.',
+  })
+  addedQuantity!: number;
 }
 
 export class PaymentDto {
@@ -195,6 +288,12 @@ export class OrderDto {
 
   @ApiProperty({ description: 'Restarts from 1 every business day.' })
   number!: number;
+
+  @ApiProperty({
+    example: 'Q-12',
+    description: 'The number to show people. The prefix tells the source.',
+  })
+  displayNumber!: string;
 
   @ApiProperty({ example: '2026-01-31' })
   businessDate!: string;

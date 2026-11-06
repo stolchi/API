@@ -5,17 +5,21 @@ import {
   SetMetadata,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Role } from '../enums.js';
+import type { Permission } from '../permissions.js';
 import type { AuthenticatedRequest, AuthUser } from './auth-user.js';
 
 export const IS_PUBLIC_KEY = 'isPublic';
-export const ROLES_KEY = 'roles';
+export const PERMISSIONS_KEY = 'permissions';
 
 /** Opts a route out of the global JWT guard. */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 
-/** Limits a route to the given roles. Without it, any signed-in user may call the route. */
-export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
+/**
+ * Limits a route to users holding at least one of the given permissions. Without it,
+ * any signed-in user may call the route. On a method it replaces the class's list.
+ */
+export const RequireAny = (...permissions: Permission[]) =>
+  SetMetadata(PERMISSIONS_KEY, permissions);
 
 function userOf(context: ExecutionContext): AuthUser {
   const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();

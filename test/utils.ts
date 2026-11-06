@@ -8,7 +8,7 @@ import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import type { Role } from '../src/common/enums.js';
 import { loadEnvFile } from '../src/database/database.config.js';
-import { User } from '../src/database/entities/index.js';
+import { StaffRole, User } from '../src/database/entities/index.js';
 
 export const API = '/api/v1';
 export const PASSWORD = 'correct-horse-battery';
@@ -77,15 +77,24 @@ export async function registerCafe(
 /** Creates a staff user directly and signs them in. */
 export async function loginAs(
   app: INestApplication,
-  role: Role,
+  role: Role | 'SUPER_ADMIN',
   cafeId: string | null,
 ): Promise<string> {
   const phone = nextPhone();
-  await app.get(DataSource).manager.insert(User, {
+  const { manager } = app.get(DataSource);
+  const staffRole =
+    role === 'SUPER_ADMIN'
+      ? null
+      : await manager.findOneByOrFail(StaffRole, {
+          cafeId: cafeId as string,
+          systemKey: role,
+        });
+  await manager.insert(User, {
     cafeId,
     name: role,
     phone,
-    role,
+    isSuperAdmin: role === 'SUPER_ADMIN',
+    roleId: staffRole?.id ?? null,
     passwordHash: await argon2.hash(PASSWORD),
   });
   const { body } = await request(app.getHttpServer())

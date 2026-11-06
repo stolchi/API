@@ -20,9 +20,10 @@ import {
   ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
-import { CurrentCafe, Roles } from '../common/auth/decorators.js';
-import { Role } from '../common/enums.js';
+import { CurrentCafe, RequireAny } from '../common/auth/decorators.js';
+import { Permission } from '../common/permissions.js';
 import {
+  BulkCreateTablesDto,
   CreateTableDto,
   TableDto,
   TableQrQueryDto,
@@ -32,13 +33,18 @@ import { TablesService } from './tables.service.js';
 
 @ApiTags('tables')
 @ApiBearerAuth()
-@Roles(Role.OWNER)
+@RequireAny(Permission.TABLES_MANAGE)
 @Controller('tables')
 export class TablesController {
   constructor(private readonly tables: TablesService) {}
 
   @Get()
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  // The kitchen screen shows which table an order goes to.
+  @RequireAny(
+    Permission.TABLES_MANAGE,
+    Permission.ORDERS_VIEW,
+    Permission.KITCHEN_WORK,
+  )
   @ApiOkResponse({ type: [TableDto] })
   list(@CurrentCafe() cafeId: string): Promise<TableDto[]> {
     return this.tables.list(cafeId);
@@ -59,7 +65,7 @@ export class TablesController {
   }
 
   @Get(':id')
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  @RequireAny(Permission.TABLES_MANAGE, Permission.ORDERS_VIEW)
   @ApiOkResponse({ type: TableDto })
   get(
     @CurrentCafe() cafeId: string,
@@ -94,6 +100,15 @@ export class TablesController {
     @Body() dto: CreateTableDto,
   ): Promise<TableDto> {
     return this.tables.create(cafeId, dto);
+  }
+
+  @Post('bulk')
+  @ApiCreatedResponse({ type: [TableDto] })
+  createMany(
+    @CurrentCafe() cafeId: string,
+    @Body() dto: BulkCreateTablesDto,
+  ): Promise<TableDto[]> {
+    return this.tables.createMany(cafeId, dto);
   }
 
   @Patch(':id')

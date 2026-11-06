@@ -1,0 +1,111 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { randomBytes } from 'node:crypto';
+import { Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity.js';
+import { encryptSecret, parseSecretKey } from '../common/crypto/secret-box.js';
+import { Cafe } from '../database/entities/cafe.entity.js';
+import { TelegramBot } from '../database/entities/telegram-bot.entity.js';
+import { detectImageType } from '../storage/image-type.js';
+import { StorageService } from '../storage/storage.service.js';
+import type { CafeDto, UpdateCafeDto, WorkingHoursDto } from './cafes.dto.js';
+
+@Injectable()
+export class CafesService {
+  private readonly tokenKey: Buffer;
+
+  constructor(
+    @InjectRepository(Cafe) private readonly cafes: Repository<Cafe>,
+    @InjectRepository(TelegramBot)
+    private readonly bots: Repository<TelegramBot>,
+    private readonly storage: StorageService,
+    config: ConfigService,
+  ) {
+    this.tokenKey = parseSecretKey(
+      config.getOrThrow<string>('TELEGRAM_TOKEN_KEY'),
+    );
+  }
+
+  async current(cafeId: string): Promise<CafeDto> {
+    const cafe = await this.load(cafeId);
+    const bot = await this.bots.findOneBy({ cafeId });
+    return {
+      id: cafe.id,
+      name: cafe.name,
+      slug: cafe.slug,
+      currency: cafe.currency,
+      logoUrl: cafe.logoUrl,
+      primaryColor: cafe.primaryColor,
+      phone: cafe.phone,
+      address: cafe.address,
+      workingHours: cafe.workingHours as WorkingHoursDto | null,
+      telegramBot: bot && { username: bot.username, isActive: bot.isActive },
+    };
+  }
+
+  async update(cafeId: string, dto: UpdateCafeDto): Promise<CafeDto> {
+    await this.load(cafeId);
+    await this.cafes.update({ id: cafeId }, {
+      ...dto,
+      // Validation produces class instances; the jsonb column wants plain values.
+      ...(dto.workingHours && {
+        workingHours: { ...dto.workingHours } as object,
+      }),
+    } as QueryDeepPartialEntity<Cafe>);
+    return this.current(cafeId);
+  }
+
+  async setLogo(
+    cafeId: string,
+    file: { buffer: Buffer } | undefined,
+  ): Promise<CafeDto> {
+    if (!file) throw new BadRequestException('file is required');
+    const extension = detectImageType(file.buffer);
+    if (!extension) {
+      throw new BadRequestException(
+        'Only JPEG, PNG and WebP images are allowed',
+      );
+    }
+    const before = await this.load(cafeId);
+    const logoUrl = await this.storage.save({
+      buffer: file.buffer,
+      extension,
+    });
+    await this.cafes.update({ id: cafeId }, { logoUrl });
+    if (before.logoUrl) await this.storage.remove(before.logoUrl);
+    return this.current(cafeId);
+  }
+
+  /**
+   * Only stores the token. Checking it with Telegram and registering the webhook
+   * belong to the bot itself, so a saved bot stays inactive until then.
+   */
+  async setTelegramBot(cafeId: string, token: string): Promise<CafeDto> {
+    await this.load(cafeId);
+    const tokenEncrypted = encryptSecret(token, this.tokenKey);
+    const existing = await this.bots.findOneBy({ cafeId });
+    await this.bots.save(
+      existing
+        ? { ...existing, tokenEncrypted, username: null, isActive: false }
+        : {
+            cafeId,
+            tokenEncrypted,
+            username: null,
+            isActive: false,
+            webhookSecret: randomBytes(32).toString('hex'),
+          },
+    );
+    return this.current(cafeId);
+  }
+
+  private async load(cafeId: string): Promise<Cafe> {
+    const cafe = await this.cafes.findOneBy({ id: cafeId });
+    if (!cafe) throw new NotFoundException();
+    return cafe;
+  }
+}

@@ -7,9 +7,10 @@ import {
 } from '@nestjs/swagger';
 import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
-import { CurrentCafe, Roles } from '../common/auth/decorators.js';
+import { CurrentCafe, RequireAny } from '../common/auth/decorators.js';
 import { tashkentDate } from '../common/dates.js';
-import { OrderStatus, Role } from '../common/enums.js';
+import { OrderStatus } from '../common/enums.js';
+import { Permission } from '../common/permissions.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { Order } from '../database/entities/order.entity.js';
 
@@ -112,7 +113,7 @@ class DashboardService {
 
 @ApiTags('dashboard')
 @ApiBearerAuth()
-@Roles(Role.OWNER, Role.CASHIER)
+@RequireAny(Permission.DASHBOARD_VIEW)
 @Controller('dashboard')
 class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}

@@ -122,6 +122,9 @@ export class PublicOrderDto {
   @ApiProperty()
   number!: number;
 
+  @ApiProperty({ example: 'Q-12' })
+  displayNumber!: string;
+
   @ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus' })
   status!: OrderStatus;
 
@@ -136,4 +139,22 @@ export class PublicOrderDto {
 
   @ApiProperty({ type: [PublicOrderItemDto] })
   items!: PublicOrderItemDto[];
+}
+
+/** What a monitor in the cafe shows customers: order numbers, and nothing about anyone. */
+export class PublicScreenDto {
+  @ApiProperty()
+  cafeName!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  logoUrl!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  primaryColor!: string | null;
+
+  @ApiProperty({ type: [String], description: 'Oldest first.' })
+  preparing!: string[];
+
+  @ApiProperty({ type: [String], description: 'Oldest first.' })
+  ready!: string[];
 }

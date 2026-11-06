@@ -4,7 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtAuthGuard } from '../common/auth/jwt-auth.guard.js';
-import { RolesGuard } from '../common/auth/roles.guard.js';
+import { PermissionsGuard } from '../common/auth/permissions.guard.js';
 import { RefreshToken } from '../database/entities/refresh-token.entity.js';
 import { User } from '../database/entities/user.entity.js';
 import { AuthController } from './auth.controller.js';
@@ -25,9 +25,9 @@ import { AuthService } from './auth.service.js';
   exports: [JwtModule],
   providers: [
     AuthService,
-    // Order matters: authenticate first, then check roles.
+    // Order matters: authenticate first, then check permissions.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AuthModule {}

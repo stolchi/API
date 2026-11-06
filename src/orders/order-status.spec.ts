@@ -1,5 +1,6 @@
 import { OrderStatus, Role } from '../common/enums.js';
-import { canTransition, roleMaySetStatus } from './order-status.js';
+import { DEFAULT_ROLES, Permission } from '../common/permissions.js';
+import { canTransition, maySetStatus } from './order-status.js';
 
 const { NEW, ACCEPTED, COOKING, READY, SERVED, PAID, CANCELLED } = OrderStatus;
 const ALL = Object.values(OrderStatus);
@@ -19,21 +20,29 @@ describe('canTransition', () => {
   });
 });
 
-describe('roleMaySetStatus', () => {
+describe('maySetStatus', () => {
+  const allowedFor = (systemKey: Role) => {
+    const role = DEFAULT_ROLES.find((item) => item.systemKey === systemKey);
+    return ALL.filter((to) => maySetStatus(role?.permissions ?? [], to)).sort();
+  };
+
   it('limits the cook to kitchen steps', () => {
-    expect(ALL.filter((to) => roleMaySetStatus(Role.COOK, to)).sort()).toEqual(
-      [ACCEPTED, COOKING, READY].sort(),
-    );
+    expect(allowedFor(Role.COOK)).toEqual([ACCEPTED, COOKING, READY].sort());
   });
 
-  it('does not let a waiter take money or cancel', () => {
-    expect(roleMaySetStatus(Role.WAITER, PAID)).toBe(false);
-    expect(roleMaySetStatus(Role.WAITER, CANCELLED)).toBe(false);
+  it('lets a default waiter cancel, but not take money or move the order on', () => {
+    expect(allowedFor(Role.WAITER)).toEqual([CANCELLED]);
   });
 
-  it('gives a super admin, who has no cafe, nothing', () => {
-    expect(ALL.some((to) => roleMaySetStatus(Role.SUPER_ADMIN, to))).toBe(
-      false,
-    );
+  it('gives the owner every step', () => {
+    expect(allowedFor(Role.OWNER)).toEqual(ALL.filter((s) => s !== NEW).sort());
+  });
+
+  it('gives someone without permissions nothing', () => {
+    expect(ALL.some((to) => maySetStatus([], to))).toBe(false);
+  });
+
+  it('follows the permission, not the role', () => {
+    expect(maySetStatus([Permission.ORDERS_SERVE], SERVED)).toBe(true);
   });
 });

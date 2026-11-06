@@ -1,11 +1,11 @@
 import type { Request } from 'express';
-import { Role } from '../enums.js';
+import type { Permission } from '../permissions.js';
 
-/** Claims carried by the access token. This is the only trusted source of `cafeId`. */
+/** Who is calling. `cafeId` comes from the access token, the rest fresh from the database. */
 export interface AuthUser {
   id: string;
   cafeId: string | null;
-  role: Role;
+  permissions: Permission[];
 }
 
 export interface AuthenticatedRequest extends Request {

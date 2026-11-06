@@ -4,17 +4,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'node:crypto';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { isUniqueViolation } from '../common/validation.js';
 import { CafeTable } from '../database/entities/cafe-table.entity.js';
 import { Cafe } from '../database/entities/cafe.entity.js';
 import { buildMenuUrl } from './menu-url.js';
-import type { CreateTableDto, TableDto, UpdateTableDto } from './tables.dto.js';
+import type {
+  BulkCreateTablesDto,
+  CreateTableDto,
+  TableDto,
+  UpdateTableDto,
+} from './tables.dto.js';
 
 const NAME_TAKEN = 'A table with this name already exists';
 
@@ -32,6 +37,7 @@ export class TablesService {
     @InjectRepository(CafeTable) tables: Repository<CafeTable>,
     @InjectRepository(Cafe) private readonly cafes: Repository<Cafe>,
     private readonly config: ConfigService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {
     this.tables = new TenantRepository(tables);
   }
@@ -55,6 +61,37 @@ export class TablesService {
         qrToken: randomBytes(16).toString('hex'),
       });
       return this.toDto(row, slug);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException(NAME_TAKEN);
+      throw error;
+    }
+  }
+
+  /** All or nothing: one name already taken leaves no half-made floor behind. */
+  async createMany(
+    cafeId: string,
+    { prefix, from, count, zone }: BulkCreateTablesDto,
+  ): Promise<TableDto[]> {
+    const { slug } = await this.cafeOf(cafeId);
+    const name = prefix.trim();
+    try {
+      const rows = await this.dataSource.transaction(async (manager) => {
+        const tables = new TenantRepository(
+          manager.getRepository(CafeTable),
+        ).forCafe(cafeId);
+        const created: CafeTable[] = [];
+        for (let number = from; number < from + count; number += 1) {
+          created.push(
+            await tables.create({
+              name: `${name} ${number}`,
+              zone: zone ?? null,
+              qrToken: randomBytes(16).toString('hex'),
+            }),
+          );
+        }
+        return created;
+      });
+      return rows.map((row) => this.toDto(row, slug));
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException(NAME_TAKEN);
       throw error;

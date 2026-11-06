@@ -15,10 +15,12 @@ import {
   Repository,
 } from 'typeorm';
 import type { AccessTokenPayload } from '../common/auth/jwt-auth.guard.js';
+import { DEFAULT_ROLES, permissionsOf } from '../common/permissions.js';
 import { Role } from '../common/enums.js';
 import { slugify } from '../common/slug.js';
 import { Cafe } from '../database/entities/cafe.entity.js';
 import { RefreshToken } from '../database/entities/refresh-token.entity.js';
+import { StaffRole } from '../database/entities/staff-role.entity.js';
 import { User } from '../database/entities/user.entity.js';
 import type {
   AuthResponseDto,
@@ -63,13 +65,18 @@ export class AuthService {
             slug: dto.slug ?? (await this.uniqueSlug(manager, dto.cafeName)),
           }),
         );
+        const roles = await manager.save(
+          DEFAULT_ROLES.map((role) =>
+            manager.create(StaffRole, { ...role, cafeId: cafe.id }),
+          ),
+        );
         const user = await manager.save(
           manager.create(User, {
             cafeId: cafe.id,
             name: dto.ownerName,
             phone: dto.phone,
             passwordHash,
-            role: Role.OWNER,
+            role: roles.find(({ systemKey }) => systemKey === Role.OWNER),
           }),
         );
         return this.startSession(user, manager);
@@ -84,6 +91,7 @@ export class AuthService {
       .createQueryBuilder('user')
       .addSelect('user.passwordHash')
       .leftJoinAndSelect('user.cafe', 'cafe')
+      .leftJoinAndSelect('user.role', 'role')
       .where('user.phone = :phone', { phone: dto.phone })
       .getOne();
 
@@ -103,7 +111,7 @@ export class AuthService {
 
     const token = await this.refreshTokens.findOne({
       where: { tokenHash: this.hash(rawToken) },
-      relations: { user: { cafe: true } },
+      relations: { user: { cafe: true, role: true } },
     });
     if (!token?.user) throw new UnauthorizedException();
 
@@ -146,13 +154,18 @@ export class AuthService {
   }
 
   async me(userId: string): Promise<UserDto> {
-    const user = await this.users.findOneBy({ id: userId });
+    const user = await this.users.findOne({
+      where: { id: userId },
+      relations: { role: true },
+    });
     if (!user) throw new UnauthorizedException();
     return this.toUserDto(user);
   }
 
   private canSignIn(user: User): boolean {
-    return user.cafeId === null || user.cafe?.isActive === true;
+    return (
+      user.isActive && (user.cafeId === null || user.cafe?.isActive === true)
+    );
   }
 
   private async startSession(
@@ -177,7 +190,6 @@ export class AuthService {
     const payload: AccessTokenPayload = {
       sub: user.id,
       cafeId: user.cafeId,
-      role: user.role,
     };
     return this.jwt.signAsync(payload);
   }
@@ -214,7 +226,15 @@ export class AuthService {
       cafeId: user.cafeId,
       name: user.name,
       phone: user.phone,
-      role: user.role,
+      isSuperAdmin: user.isSuperAdmin,
+      role: user.role
+        ? {
+            id: user.role.id,
+            name: user.role.name,
+            systemKey: user.role.systemKey,
+          }
+        : null,
+      permissions: permissionsOf(user.role),
     };
   }
 

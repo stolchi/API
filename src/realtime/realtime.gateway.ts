@@ -9,12 +9,16 @@ import { isUUID } from 'class-validator';
 import type { Server, Socket } from 'socket.io';
 import { Repository } from 'typeorm';
 import type { AccessTokenPayload } from '../common/auth/jwt-auth.guard.js';
-import { Role } from '../common/enums.js';
+import { Permission, permissionsOf } from '../common/permissions.js';
+import { Cafe } from '../database/entities/cafe.entity.js';
 import { Order } from '../database/entities/order.entity.js';
+import { User } from '../database/entities/user.entity.js';
 
 export const cafeRoom = (cafeId: string) => `cafe:${cafeId}`;
 export const kitchenRoom = (cafeId: string) => `kitchen:${cafeId}`;
 export const orderRoom = (orderId: string) => `order:${orderId}`;
+export const screenRoom = (cafeId: string) => `screen:${cafeId}`;
+const userRoom = (userId: string) => `user:${userId}`;
 
 /**
  * Rooms are chosen by the server from the credentials given at connection time.
@@ -28,6 +32,8 @@ export class RealtimeGateway implements OnGatewayInit {
   constructor(
     private readonly jwt: JwtService,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
+    @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(Cafe) private readonly cafes: Repository<Cafe>,
   ) {}
 
   afterInit(server: Server): void {
@@ -42,6 +48,7 @@ export class RealtimeGateway implements OnGatewayInit {
   /** Staff get the full order; `customer` is all that reaches the public order room. */
   emitOrderCreated(cafeId: string, order: unknown): void {
     this.toStaff(cafeId).emit('order.created', order);
+    this.notifyScreen(cafeId);
   }
 
   emitOrderUpdated(cafeId: string, order: unknown): void {
@@ -57,6 +64,21 @@ export class RealtimeGateway implements OnGatewayInit {
     this.server
       .to(orderRoom(customer.id))
       .emit('order.status_changed', customer);
+    this.notifyScreen(cafeId);
+  }
+
+  /** Lets the kitchen know to look again at an order it may already have finished. */
+  emitOrderItemsAdded(cafeId: string, order: unknown): void {
+    this.toStaff(cafeId).emit('order.items_added', order);
+  }
+
+  /**
+   * Their permissions changed, or they lost access: the client reconnects, which puts
+   * it in the right rooms and reloads the user, or finds out it is signed out.
+   */
+  reconnectUsers(userIds: readonly string[]): void {
+    if (userIds.length === 0) return;
+    this.server.in(userIds.map(userRoom)).disconnectSockets(true);
   }
 
   emitProductAvailabilityChanged(
@@ -66,27 +88,41 @@ export class RealtimeGateway implements OnGatewayInit {
     this.toStaff(cafeId).emit('product.availability_changed', product);
   }
 
+  /** Carries no data on purpose: what a public screen may show comes from its own endpoint. */
+  private notifyScreen(cafeId: string): void {
+    this.server.to(screenRoom(cafeId)).emit('screen.changed');
+  }
+
   private toStaff(cafeId: string) {
     // A socket in both rooms still gets each event only once.
     return this.server.to([cafeRoom(cafeId), kitchenRoom(cafeId)]);
   }
 
   private async authenticate(socket: Socket): Promise<void> {
-    const { token, orderToken } = socket.handshake.auth as {
+    const { token, orderToken, screen } = socket.handshake.auth as {
       token?: unknown;
       orderToken?: unknown;
+      screen?: unknown;
     };
 
     if (typeof token === 'string') {
       const payload = await this.jwt.verifyAsync<
         AccessTokenPayload & { exp: number }
       >(token);
-      if (!payload.cafeId) throw new Error('Not a cafe user');
-      await socket.join(
-        payload.role === Role.COOK
-          ? kitchenRoom(payload.cafeId)
-          : cafeRoom(payload.cafeId),
-      );
+      const user = await this.users.findOne({
+        where: { id: payload.sub, isActive: true },
+        relations: { role: true },
+      });
+      if (!user?.cafeId) throw new Error('Not a cafe user');
+
+      const permissions = permissionsOf(user.role);
+      await socket.join(userRoom(user.id));
+      // Order events carry customer data, so a role that cannot see orders hears none.
+      if (permissions.includes(Permission.ORDERS_VIEW)) {
+        await socket.join(cafeRoom(user.cafeId));
+      } else if (permissions.includes(Permission.KITCHEN_WORK)) {
+        await socket.join(kitchenRoom(user.cafeId));
+      }
       this.disconnectAtExpiry(socket, payload.exp);
       return;
     }
@@ -95,6 +131,13 @@ export class RealtimeGateway implements OnGatewayInit {
       const order = await this.orders.findOneBy({ publicToken: orderToken });
       if (!order) throw new Error('Unknown order');
       await socket.join(orderRoom(order.id));
+      return;
+    }
+
+    if (typeof screen === 'string') {
+      const cafe = await this.cafes.findOneBy({ slug: screen, isActive: true });
+      if (!cafe) throw new Error('Unknown cafe');
+      await socket.join(screenRoom(cafe.id));
       return;
     }
 

@@ -1,5 +1,5 @@
+/** Marks the default role a cafe's `StaffRole` came from. Custom roles have none. */
 export enum Role {
-  SUPER_ADMIN = 'SUPER_ADMIN',
   OWNER = 'OWNER',
   CASHIER = 'CASHIER',
   WAITER = 'WAITER',

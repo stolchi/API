@@ -17,8 +17,8 @@ import {
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { CurrentCafe, Roles } from '../common/auth/decorators.js';
-import { Role } from '../common/enums.js';
+import { CurrentCafe, RequireAny } from '../common/auth/decorators.js';
+import { Permission } from '../common/permissions.js';
 import {
   CategoryDto,
   CreateCategoryDto,
@@ -26,22 +26,30 @@ import {
 } from './categories.dto.js';
 import { CategoriesService } from './categories.service.js';
 
+/** Taking or editing an order means picking from the menu. */
+const MENU_READERS = [
+  Permission.MENU_MANAGE,
+  Permission.MENU_AVAILABILITY,
+  Permission.ORDERS_CREATE,
+  Permission.ORDERS_EDIT,
+];
+
 @ApiTags('categories')
 @ApiBearerAuth()
-@Roles(Role.OWNER)
+@RequireAny(Permission.MENU_MANAGE)
 @Controller('categories')
 export class CategoriesController {
   constructor(private readonly categories: CategoriesService) {}
 
   @Get()
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  @RequireAny(...MENU_READERS)
   @ApiOkResponse({ type: [CategoryDto] })
   list(@CurrentCafe() cafeId: string): Promise<CategoryDto[]> {
     return this.categories.list(cafeId);
   }
 
   @Get(':id')
-  @Roles(Role.OWNER, Role.CASHIER, Role.WAITER)
+  @RequireAny(...MENU_READERS)
   @ApiOkResponse({ type: CategoryDto })
   get(
     @CurrentCafe() cafeId: string,

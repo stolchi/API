@@ -6,6 +6,7 @@ import { Order } from './order.entity.js';
 import { Payment } from './payment.entity.js';
 import { Product } from './product.entity.js';
 import { RefreshToken } from './refresh-token.entity.js';
+import { StaffRole } from './staff-role.entity.js';
 import { TelegramBot } from './telegram-bot.entity.js';
 import { User } from './user.entity.js';
 
@@ -18,6 +19,7 @@ export {
   Payment,
   Product,
   RefreshToken,
+  StaffRole,
   TelegramBot,
   User,
 };
@@ -25,6 +27,7 @@ export { TenantEntity } from './tenant.entity.js';
 
 export const ALL_ENTITIES = [
   Cafe,
+  StaffRole,
   User,
   RefreshToken,
   Category,
