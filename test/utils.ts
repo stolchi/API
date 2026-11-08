@@ -6,6 +6,8 @@ import * as argon2 from 'argon2';
 import { DataSource } from 'typeorm';
 import { TelegramApi } from '../src/telegram/telegram-api.js';
 import { FakeTelegramApi } from './fake-telegram.js';
+import { Nominatim } from '../src/geo/nominatim.js';
+import { FakeNominatim } from './fake-nominatim.js';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import type { Role } from '../src/common/enums.js';
@@ -23,6 +25,9 @@ export async function createTestApp(): Promise<NestExpressApplication> {
     // Tests never reach the real Telegram.
     .overrideProvider(TelegramApi)
     .useValue(new FakeTelegramApi())
+    // Nor OpenStreetMap.
+    .overrideProvider(Nominatim)
+    .useValue(new FakeNominatim())
     .compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app);

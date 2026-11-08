@@ -4,6 +4,7 @@ export enum Role {
   CASHIER = 'CASHIER',
   WAITER = 'WAITER',
   COOK = 'COOK',
+  COURIER = 'COURIER',
 }
 
 export enum OrderSource {

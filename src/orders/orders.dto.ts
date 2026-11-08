@@ -6,6 +6,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsLatitude,
@@ -421,6 +422,48 @@ export class PaymentDto {
 }
 
 /** What an order costs, line by line: `total` is the items plus the charges. */
+export class OrderCourierDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+}
+
+export class AssignCourierDto {
+  @ApiProperty({
+    format: 'uuid',
+    type: String,
+    nullable: true,
+    description: 'Null takes the delivery back.',
+  })
+  @IsOptional()
+  @IsUUID()
+  courierId!: string | null;
+}
+
+export class CourierPickUpDto {
+  @ApiProperty({
+    minimum: 5,
+    maximum: 180,
+    example: 25,
+    description: 'How long until it is handed over, as the courier reckons.',
+  })
+  @IsInt()
+  @Min(5)
+  @Max(180)
+  etaMinutes!: number;
+}
+
+export class CourierDeliverDto {
+  @ApiProperty({
+    enum: [PaymentMethod.CASH, PaymentMethod.CARD],
+    description: 'How the customer paid what was still unpaid.',
+  })
+  @IsIn([PaymentMethod.CASH, PaymentMethod.CARD])
+  method!: PaymentMethod;
+}
+
 export class OrderAmountsDto {
   @ApiProperty({ description: "Whole so'm: the items alone." })
   itemsTotal!: number;
@@ -483,6 +526,25 @@ export class OrderDto extends OrderAmountsDto {
 
   @ApiProperty({ type: String, nullable: true })
   cancelReason!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Empty until someone at the cafe has opened it.',
+  })
+  seenAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'When the courier on the way expects to hand it over.',
+  })
+  deliveryEta!: Date | null;
+
+  @ApiProperty({ type: OrderCourierDto, nullable: true })
+  courier!: OrderCourierDto | null;
 
   @ApiProperty()
   paidAmount!: number;

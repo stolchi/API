@@ -70,6 +70,29 @@ export class Order extends TenantEntity {
   @Column({ type: 'varchar', length: 300, nullable: true })
   cancelReason!: string | null;
 
+  /**
+   * When someone at the cafe first opened it. Empty means nobody has looked yet, so a
+   * customer's order keeps standing out. Orders taken by staff are seen as they are made.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  seenAt!: Date | null;
+
+  /** When the courier expects to hand it over, set as they leave with it. */
+  @Column({ type: 'timestamptz', nullable: true })
+  deliveryEta!: Date | null;
+
+  /** The cafe's own courier taking it, for a delivery. */
+  @Index('IDX_orders_courierId')
+  @Column({ type: 'uuid', nullable: true })
+  courierId!: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
+  @JoinColumn({
+    name: 'courierId',
+    foreignKeyConstraintName: 'FK_orders_courierId',
+  })
+  courier?: Relation<User> | null;
+
   /** Telegram ids exceed 32 bits; pg returns bigint as a string. */
   @Column({ type: 'bigint', nullable: true })
   telegramUserId!: string | null;

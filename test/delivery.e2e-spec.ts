@@ -205,6 +205,32 @@ describe('Delivery (e2e)', () => {
     expect(accepted.displayNumber).toBe(`D-${order.number}`);
   });
 
+  it("keeps a customer's order new until someone at the cafe opens it", async () => {
+    const order = await fromTelegram();
+    const { body: phoned } = await delivery().expect(201);
+    expect(phoned.seenAt).not.toBeNull();
+
+    const { body: list } = await staff('get', '/orders?active=true');
+    const waiting = list.items.find((o: { id: string }) => o.id === order.id);
+    expect(waiting.seenAt).toBeNull();
+
+    const { body: seen } = await staff(
+      'post',
+      `/orders/${order.id}/seen`,
+    ).expect(200);
+    expect(seen.seenAt).not.toBeNull();
+    // Looking again keeps the first time.
+    const { body: again } = await staff(
+      'post',
+      `/orders/${order.id}/seen`,
+    ).expect(200);
+    expect(again.seenAt).toBe(seen.seenAt);
+
+    const cook = await loginAs(app, Role.COOK, cafeA.cafeId);
+    await send(cook, 'post', `/orders/${order.id}/seen`).expect(403);
+    await send(cafeB.token, 'post', `/orders/${order.id}/seen`).expect(404);
+  });
+
   it('cancels with a reason the customer can read', async () => {
     const order = await fromTelegram();
     const { body } = await staff('post', `/orders/${order.id}/cancel`)

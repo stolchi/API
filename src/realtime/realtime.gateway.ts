@@ -19,6 +19,8 @@ export const kitchenRoom = (cafeId: string) => `kitchen:${cafeId}`;
 export const orderRoom = (orderId: string) => `order:${orderId}`;
 export const screenRoom = (cafeId: string) => `screen:${cafeId}`;
 const userRoom = (userId: string) => `user:${userId}`;
+/** Couriers hear that deliveries changed, never what is in them. */
+export const couriersRoom = (cafeId: string) => `couriers:${cafeId}`;
 
 /**
  * Rooms are chosen by the server from the credentials given at connection time.
@@ -49,10 +51,12 @@ export class RealtimeGateway implements OnGatewayInit {
   emitOrderCreated(cafeId: string, order: unknown): void {
     this.toStaff(cafeId).emit('order.created', order);
     this.notifyScreen(cafeId);
+    this.notifyCouriers(cafeId, order);
   }
 
   emitOrderUpdated(cafeId: string, order: unknown): void {
     this.toStaff(cafeId).emit('order.updated', order);
+    this.notifyCouriers(cafeId, order);
   }
 
   emitOrderStatusChanged(
@@ -61,6 +65,7 @@ export class RealtimeGateway implements OnGatewayInit {
     customer: { id: string; number: number; status: string },
   ): void {
     this.toStaff(cafeId).emit('order.status_changed', order);
+    this.notifyCouriers(cafeId, order);
     this.server
       .to(orderRoom(customer.id))
       .emit('order.status_changed', customer);
@@ -73,6 +78,12 @@ export class RealtimeGateway implements OnGatewayInit {
    */
   emitOrderChanged(orderId: string): void {
     this.server.to(orderRoom(orderId)).emit('order.changed');
+  }
+
+  /** A courier's own list changed: given one, taken off one, or one of theirs moved on. */
+  emitCourierChanged(userIds: readonly string[]): void {
+    if (userIds.length === 0) return;
+    this.server.to(userIds.map(userRoom)).emit('courier.changed');
   }
 
   /** Lets the kitchen know to look again at an order it may already have finished. */
@@ -94,6 +105,13 @@ export class RealtimeGateway implements OnGatewayInit {
     product: { id: string; isAvailable: boolean },
   ): void {
     this.toStaff(cafeId).emit('product.availability_changed', product);
+  }
+
+  /** A delivery changed: every courier of the cafe reads their lists again. */
+  private notifyCouriers(cafeId: string, order: unknown): void {
+    if ((order as { type?: unknown }).type === 'DELIVERY') {
+      this.server.to(couriersRoom(cafeId)).emit('courier.changed');
+    }
   }
 
   /** Carries no data on purpose: what a public screen may show comes from its own endpoint. */
@@ -130,6 +148,9 @@ export class RealtimeGateway implements OnGatewayInit {
         await socket.join(cafeRoom(user.cafeId));
       } else if (permissions.includes(Permission.KITCHEN_WORK)) {
         await socket.join(kitchenRoom(user.cafeId));
+      }
+      if (permissions.includes(Permission.DELIVERY_COURIER)) {
+        await socket.join(couriersRoom(user.cafeId));
       }
       this.disconnectAtExpiry(socket, payload.exp);
       return;

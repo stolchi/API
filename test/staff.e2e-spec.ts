@@ -76,7 +76,7 @@ describe('Staff and roles', () => {
     it('come with every new cafe', async () => {
       const roles = await rolesOf(cafeA.token);
       expect(roles.map((role) => role.systemKey).sort()).toEqual(
-        ['CASHIER', 'COOK', 'OWNER', 'WAITER'].sort(),
+        ['CASHIER', 'COOK', 'COURIER', 'OWNER', 'WAITER'].sort(),
       );
     });
 

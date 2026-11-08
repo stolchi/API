@@ -176,6 +176,14 @@ export class PublicOrderDto extends OrderAmountsDto {
   })
   cancelReason!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'When the courier on the way expects to arrive.',
+  })
+  deliveryEta!: Date | null;
+
   @ApiProperty()
   createdAt!: Date;
 

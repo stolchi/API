@@ -9,6 +9,7 @@ import {
   DataSource,
   EntityManager,
   In,
+  IsNull,
   Not,
   type EntityTarget,
   type FindOptionsWhere,
@@ -20,8 +21,9 @@ import {
   OrderType,
   PaymentMethod,
   ProductUnit,
+  Role,
 } from '../common/enums.js';
-import { Permission } from '../common/permissions.js';
+import { Permission, permissionsOf } from '../common/permissions.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { MAX_MONEY } from '../common/validation.js';
 import { CafeTable } from '../database/entities/cafe-table.entity.js';
@@ -29,6 +31,7 @@ import { Cafe } from '../database/entities/cafe.entity.js';
 import { OrderItem } from '../database/entities/order-item.entity.js';
 import { Order } from '../database/entities/order.entity.js';
 import { Payment } from '../database/entities/payment.entity.js';
+import { User } from '../database/entities/user.entity.js';
 import { Product } from '../database/entities/product.entity.js';
 import type { TenantEntity } from '../database/entities/tenant.entity.js';
 import { RealtimeGateway } from '../realtime/realtime.gateway.js';
@@ -61,6 +64,21 @@ export interface CreateOrderInput {
 }
 
 const FINISHED = [OrderStatus.PAID, OrderStatus.CANCELLED];
+
+/** A courier can take a delivery once it is agreed, until it leaves the cafe. */
+const CLAIMABLE: readonly OrderStatus[] = [
+  OrderStatus.ACCEPTED,
+  OrderStatus.COOKING,
+  OrderStatus.READY,
+];
+
+/**
+ * Whose role lets them deliver. The owner holds every permission, but is not on the
+ * couriers' list for that.
+ */
+const isCourier = (user: User) =>
+  user.role?.systemKey !== Role.OWNER &&
+  permissionsOf(user.role).includes(Permission.DELIVERY_COURIER);
 
 /**
  * A Telegram order is a delivery, which someone confirms by phone first. Orders from
@@ -115,6 +133,11 @@ export function toOrderDto(order: Order): OrderDto {
         ? null
         : { latitude: order.latitude, longitude: order.longitude },
     cancelReason: order.cancelReason,
+    seenAt: order.seenAt,
+    deliveryEta: order.deliveryEta,
+    courier: order.courier
+      ? { id: order.courier.id, name: order.courier.name }
+      : null,
     ...amountsOf(order),
     paidAmount: paidAmountOf(order),
     note: order.note,
@@ -204,6 +227,8 @@ export class OrdersService {
             longitude: input.location.longitude,
           }),
         telegramUserId: input.telegramUserId ?? null,
+        // Staff saw it as they took it; a customer's order has to be looked at.
+        seenAt: input.source === OrderSource.POS ? new Date() : null,
         createdById: input.createdById ?? null,
       });
       await manager.insert(
@@ -250,7 +275,7 @@ export class OrdersService {
       Order,
     ).findAndCount({
       where,
-      relations: { items: true, payments: true },
+      relations: { items: true, payments: true, courier: true },
       order: {
         createdAt: 'DESC',
         number: 'DESC',
@@ -327,7 +352,230 @@ export class OrdersService {
       status: order.status,
     });
     if (to === OrderStatus.CANCELLED) this.realtime.emitOrderChanged(order.id);
+    if (order.courierId) this.realtime.emitCourierChanged([order.courierId]);
     this.events.emit({ kind: 'status', order, from });
+    return order;
+  }
+
+  /**
+   * Gives a delivery to one of the cafe's couriers, or takes it back. Only someone whose
+   * role lets them deliver, and who still works here, can be given one.
+   */
+  async assignCourier(
+    cafeId: string,
+    id: string,
+    courierId: string | null,
+  ): Promise<Order> {
+    let previous: string | null = null;
+    await this.dataSource.transaction(async (manager) => {
+      const order = await this.lock(manager, cafeId, id);
+      if (order.type !== OrderType.DELIVERY) {
+        throw new ConflictException('Only a DELIVERY order has a courier');
+      }
+      if (FINISHED.includes(order.status)) {
+        throw new ConflictException(
+          `A ${order.status} order cannot be changed`,
+        );
+      }
+      if (courierId) {
+        const courier = await manager.findOne(User, {
+          where: { id: courierId, cafeId, isActive: true },
+          relations: { role: true },
+        });
+        if (!courier || !isCourier(courier)) {
+          throw new BadRequestException('Not one of this cafe’s couriers');
+        }
+      }
+      previous = order.courierId;
+      await this.scope(manager, cafeId, Order).update({ id }, { courierId });
+    });
+
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    this.realtime.emitOrderUpdated(cafeId, toOrderDto(order));
+    this.realtime.emitCourierChanged(
+      [previous, order.courierId].filter((user): user is string => !!user),
+    );
+    return order;
+  }
+
+  /** Staff who can be given a delivery, with how many each is carrying now. */
+  async couriers(
+    cafeId: string,
+  ): Promise<{ id: string; name: string; activeDeliveries: number }[]> {
+    const staff = await this.dataSource.manager.find(User, {
+      where: { cafeId, isActive: true },
+      relations: { role: true },
+      order: { name: 'ASC' },
+    });
+    const couriers = staff.filter(isCourier);
+    const loads = couriers.length
+      ? await this.scope(this.dataSource.manager, cafeId, Order)
+          .queryBuilder('order')
+          .select('order.courierId', 'courierId')
+          .addSelect('COUNT(*)', 'count')
+          .andWhere('order.courierId IN (:...ids)', {
+            ids: couriers.map((user) => user.id),
+          })
+          .andWhere('order.status NOT IN (:...finished)', {
+            finished: FINISHED,
+          })
+          .groupBy('order.courierId')
+          .getRawMany<{ courierId: string; count: string }>()
+      : [];
+    return couriers.map((user) => ({
+      id: user.id,
+      name: user.name,
+      activeDeliveries: Number(
+        loads.find((load) => load.courierId === user.id)?.count ?? 0,
+      ),
+    }));
+  }
+
+  /** A courier's deliveries still to make, oldest first. */
+  async courierOrders(cafeId: string, courierId: string): Promise<Order[]> {
+    return this.scope(this.dataSource.manager, cafeId, Order).find({
+      where: { courierId, status: Not(In(FINISHED)) },
+      relations: { items: true, payments: true, courier: true },
+      order: {
+        createdAt: 'ASC',
+        items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
+      },
+    });
+  }
+
+  /** Deliveries nobody has taken yet, from the moment they are agreed, oldest first. */
+  async availableDeliveries(cafeId: string): Promise<Order[]> {
+    return this.scope(this.dataSource.manager, cafeId, Order).find({
+      where: {
+        type: OrderType.DELIVERY,
+        courierId: IsNull(),
+        status: In(CLAIMABLE),
+      },
+      relations: { items: true, payments: true, courier: true },
+      order: {
+        createdAt: 'ASC',
+        items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
+      },
+    });
+  }
+
+  /** A courier takes a delivery. Two at once: the first gets it, the other is told. */
+  async claimDelivery(
+    cafeId: string,
+    courierId: string,
+    id: string,
+  ): Promise<Order> {
+    await this.dataSource.transaction(async (manager) => {
+      const order = await this.lock(manager, cafeId, id);
+      if (order.type !== OrderType.DELIVERY) throw new NotFoundException();
+      if (order.courierId) {
+        throw new ConflictException('Another courier has taken it');
+      }
+      if (!CLAIMABLE.includes(order.status)) {
+        throw new ConflictException(`A ${order.status} order cannot be taken`);
+      }
+      await this.scope(manager, cafeId, Order).update({ id }, { courierId });
+    });
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    this.realtime.emitOrderUpdated(cafeId, toOrderDto(order));
+    return order;
+  }
+
+  /** Gives a delivery back before leaving with it, for another courier to take. */
+  async releaseDelivery(
+    cafeId: string,
+    courierId: string,
+    id: string,
+  ): Promise<Order> {
+    await this.dataSource.transaction(async (manager) => {
+      const order = await this.lock(manager, cafeId, id);
+      if (order.courierId !== courierId) throw new NotFoundException();
+      if (!CLAIMABLE.includes(order.status)) {
+        throw new ConflictException('It is already on the way');
+      }
+      await this.scope(manager, cafeId, Order).update(
+        { id },
+        { courierId: null },
+      );
+    });
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    this.realtime.emitOrderUpdated(cafeId, toOrderDto(order));
+    return order;
+  }
+
+  /**
+   * The courier has it and is on the way: what a cashier would mark served. They say
+   * how long it will take, which the customer is told.
+   */
+  async courierPickUp(
+    cafeId: string,
+    courierId: string,
+    id: string,
+    etaMinutes: number,
+  ): Promise<Order> {
+    await this.assertCourierOf(cafeId, courierId, id, OrderStatus.READY);
+    await this.scope(this.dataSource.manager, cafeId, Order).update(
+      { id },
+      { deliveryEta: new Date(Date.now() + etaMinutes * 60_000) },
+    );
+    return this.changeStatus(cafeId, id, OrderStatus.SERVED, [
+      Permission.ORDERS_SERVE,
+    ]);
+  }
+
+  /**
+   * Delivered: what is still unpaid was taken by the courier, and the order is closed.
+   * The money is the courier's to hand over; the payment records how it was paid.
+   */
+  async courierDeliver(
+    cafeId: string,
+    courierId: string,
+    id: string,
+    method: PaymentMethod,
+  ): Promise<Order> {
+    const order = await this.assertCourierOf(
+      cafeId,
+      courierId,
+      id,
+      OrderStatus.SERVED,
+    );
+    const unpaid = order.total - paidAmountOf(order);
+    if (unpaid > 0) {
+      await this.addPayments(cafeId, id, [{ method, amount: unpaid }]);
+    }
+    return this.changeStatus(cafeId, id, OrderStatus.PAID, [
+      Permission.ORDERS_PAYMENT,
+    ]);
+  }
+
+  private async assertCourierOf(
+    cafeId: string,
+    courierId: string,
+    id: string,
+    status: OrderStatus,
+  ): Promise<Order> {
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    // Someone else's delivery is as good as not there.
+    if (order.courierId !== courierId) throw new NotFoundException();
+    if (order.status !== status) {
+      throw new ConflictException(
+        `This needs the order to be ${status}, not ${order.status}`,
+      );
+    }
+    return order;
+  }
+
+  /** Someone at the cafe opened it. Only the first time counts. */
+  async markSeen(cafeId: string, id: string): Promise<Order> {
+    const updated = await this.scope(
+      this.dataSource.manager,
+      cafeId,
+      Order,
+    ).update({ id, seenAt: IsNull() }, { seenAt: new Date() });
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    if (updated.affected) {
+      this.realtime.emitOrderUpdated(cafeId, toOrderDto(order));
+    }
     return order;
   }
 
@@ -541,6 +789,7 @@ export class OrdersService {
     // The customer is told what they will now get, and for how much.
     this.realtime.emitOrderChanged(order.id);
     this.events.emit({ kind: 'changed', order });
+    if (order.courierId) this.realtime.emitCourierChanged([order.courierId]);
     if (order.status !== before) {
       this.events.emit({ kind: 'status', order, from: before });
     }
@@ -735,7 +984,7 @@ export class OrdersService {
   ): Promise<Order> {
     const order = await this.scope(manager, cafeId, Order).findOne({
       where: { id },
-      relations: { items: true, payments: true },
+      relations: { items: true, payments: true, courier: true },
       order: {
         items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
         payments: { createdAt: 'ASC' },

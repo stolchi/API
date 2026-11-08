@@ -17,7 +17,7 @@ import {
   encryptSecret,
   parseSecretKey,
 } from '../common/crypto/secret-box.js';
-import { tashkentDate, tashkentHour } from '../common/dates.js';
+import { tashkentClock, tashkentDate, tashkentHour } from '../common/dates.js';
 import {
   OrderSource,
   OrderStatus,
@@ -76,10 +76,17 @@ function customerNotice(order: Order): string | null {
       return order.type === OrderType.TAKEAWAY
         ? `🍽 Buyurtmangiz ${number} tayyor! Olib ketishingiz mumkin.`
         : null;
-    case OrderStatus.SERVED:
-      return order.type === OrderType.DELIVERY
-        ? `🚚 Buyurtmangiz ${number} yo'lga chiqdi.`
-        : null;
+    case OrderStatus.SERVED: {
+      if (order.type !== OrderType.DELIVERY) return null;
+      const eta = order.deliveryEta;
+      if (!eta)
+        return `🚚 Kuryer buyurtmangiz ${number} ni oldi va yo'lga chiqdi.`;
+      const minutes = Math.max(
+        1,
+        Math.round((eta.getTime() - Date.now()) / 60_000),
+      );
+      return `🚚 Kuryer buyurtmangiz ${number} ni oldi va yo'lga chiqdi.\nTaxminan <b>${minutes} daqiqada</b> (${tashkentClock(eta)} gacha) yetkazadi.`;
+    }
     case OrderStatus.CANCELLED:
       return [
         `❌ Buyurtmangiz ${number} bekor qilindi.`,

@@ -15,6 +15,8 @@ export enum Permission {
   TABLES_MANAGE = 'TABLES_MANAGE',
   SETTINGS_MANAGE = 'SETTINGS_MANAGE',
   STAFF_MANAGE = 'STAFF_MANAGE',
+  /** Delivers the orders assigned to them, and takes the money for them. */
+  DELIVERY_COURIER = 'DELIVERY_COURIER',
 }
 
 const ALL_PERMISSIONS = Object.values(Permission);
@@ -29,6 +31,7 @@ const {
   ORDERS_PAYMENT,
   KITCHEN_WORK,
   MENU_AVAILABILITY,
+  DELIVERY_COURIER,
 } = Permission;
 
 /** The roles every cafe starts with. The owner's list is fixed; the others can be edited. */
@@ -59,6 +62,7 @@ export const DEFAULT_ROLES: readonly {
     permissions: [ORDERS_VIEW, ORDERS_CREATE, ORDERS_EDIT, ORDERS_CANCEL],
   },
   { systemKey: Role.COOK, name: 'Oshpaz', permissions: [KITCHEN_WORK] },
+  { systemKey: Role.COURIER, name: 'Kuryer', permissions: [DELIVERY_COURIER] },
 ];
 
 /** Working with orders in any way needs seeing them, so a role cannot end up half-usable. */

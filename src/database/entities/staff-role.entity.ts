@@ -11,7 +11,8 @@ export class StaffRole extends TenantEntity {
   name!: string;
 
   /** Set on default roles, which cannot be renamed or deleted. */
-  @Column({ type: 'enum', enum: Role, nullable: true })
+  /** Text, not a Postgres enum: a new default role must not need ALTER TYPE. */
+  @Column({ type: 'varchar', length: 20, nullable: true })
   systemKey!: Role | null;
 
   /** Values of `Permission`. */

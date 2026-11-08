@@ -20,3 +20,15 @@ const hourFormatter = new Intl.DateTimeFormat('en-GB', {
 export function tashkentHour(now: Date = new Date()): number {
   return Number(hourFormatter.format(now));
 }
+
+const clockFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Tashkent',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** `14:35`, as a clock in Tashkent shows it. */
+export function tashkentClock(at: Date): string {
+  return clockFormatter.format(at);
+}

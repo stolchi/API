@@ -412,6 +412,35 @@ describe('Telegram bot (e2e)', () => {
       expect(placed.publicToken).not.toBe(second.publicToken);
     });
 
+    it('tells the customer when a courier leaves, and how long they will be', async () => {
+      await linkOwner();
+      await miniAppOrder({}).expect(201);
+      const { body: list } = await as(cafeA.token).get('/orders?active=true');
+      const order = list.items[0];
+      await as(cafeA.token)
+        .patch(`/orders/${order.id}/status`)
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+      const courier = await loginAs(app, Role.COURIER, cafeA.cafeId);
+      await as(courier).post(`/courier/orders/${order.id}/claim`).expect(200);
+      for (const status of ['COOKING', 'READY']) {
+        await as(cafeA.token)
+          .patch(`/orders/${order.id}/status`)
+          .send({ status })
+          .expect(200);
+      }
+      fake.reset();
+      await as(courier)
+        .post(`/courier/orders/${order.id}/pick-up`)
+        .send({ etaMinutes: 25 })
+        .expect(200);
+      await eventually(() => {
+        const message = fake.sent.find((m) => m.chatId === String(CUSTOMER));
+        expect(message?.text).toContain('Kuryer buyurtmangiz');
+        expect(message?.text).toMatch(/2[45] daqiqada/);
+      });
+    });
+
     it('says nothing about orders from the till', async () => {
       await linkOwner();
       await as(cafeA.token)

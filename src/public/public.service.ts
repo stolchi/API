@@ -35,6 +35,7 @@ export function toPublicOrderDto(order: Order): PublicOrderDto {
     status: order.status,
     type: order.type,
     cancelReason: order.cancelReason,
+    deliveryEta: order.deliveryEta,
     ...amountsOf(order),
     createdAt: order.createdAt,
     items: (order.items ?? []).map((item) => ({
