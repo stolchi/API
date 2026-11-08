@@ -11,6 +11,7 @@ import { AllExceptionsFilter } from './common/http-exception.filter.js';
 import { validateEnv } from './config/env.validation.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { GeoModule } from './geo/geo.module.js';
+import { NetworkModule } from './network/network.module.js';
 import { buildDataSourceOptions } from './database/database.config.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { ProductsModule } from './products/products.module.js';
@@ -46,6 +47,7 @@ import { TelegramModule } from './telegram/telegram.module.js';
     DashboardModule,
     TelegramModule,
     GeoModule,
+    NetworkModule,
   ],
   controllers: [AppController],
   providers: [

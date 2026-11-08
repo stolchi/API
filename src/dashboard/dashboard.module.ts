@@ -61,7 +61,11 @@ class DashboardService {
     const [revenue, orderCount, activeTables, topProducts] = await Promise.all([
       orders
         .queryBuilder('order')
-        .select('COALESCE(SUM(order.total), 0)', 'value')
+        // A network courier's delivery fee is theirs, not the cafe's.
+        .select(
+          'COALESCE(SUM(order.total - CASE WHEN order.networkCourierId IS NULL THEN 0 ELSE order.deliveryFee END), 0)',
+          'value',
+        )
         .andWhere('order.businessDate = :date', { date })
         .andWhere('order.status = :paid', { paid: OrderStatus.PAID })
         .getRawOne<{ value: string }>(),

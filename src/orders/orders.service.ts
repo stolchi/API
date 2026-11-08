@@ -20,6 +20,7 @@ import {
   OrderStatus,
   OrderType,
   PaymentMethod,
+  DeliveryMode,
   ProductUnit,
   Role,
 } from '../common/enums.js';
@@ -64,6 +65,18 @@ export interface CreateOrderInput {
 }
 
 const FINISHED = [OrderStatus.PAID, OrderStatus.CANCELLED];
+
+/**
+ * What the cafe itself is owed. A network courier keeps the delivery fee: the cafe has
+ * been settled with once they took the order, and the rest is theirs to collect.
+ */
+export const owedToCafe = (
+  order: Pick<Order, 'total' | 'deliveryFee' | 'networkCourierId'>,
+) => order.total - (order.networkCourierId ? order.deliveryFee : 0);
+
+/** Whether an agreed delivery goes straight to the network. */
+const offersAtOnce = (cafe: Pick<Cafe, 'deliveryMode'>, type: OrderType) =>
+  type === OrderType.DELIVERY && cafe.deliveryMode === DeliveryMode.NETWORK;
 
 /** A courier can take a delivery once it is agreed, until it leaves the cafe. */
 const CLAIMABLE: readonly OrderStatus[] = [
@@ -138,6 +151,15 @@ export function toOrderDto(order: Order): OrderDto {
     courier: order.courier
       ? { id: order.courier.id, name: order.courier.name }
       : null,
+    offeredAt: order.offeredAt,
+    networkCourier: order.networkCourier
+      ? {
+          id: order.networkCourier.id,
+          name: order.networkCourier.name,
+          phone: order.networkCourier.phone,
+          vehicle: order.networkCourier.vehicle,
+        }
+      : null,
     ...amountsOf(order),
     paidAmount: paidAmountOf(order),
     note: order.note,
@@ -210,6 +232,12 @@ export class OrdersService {
         businessDate,
         source: input.source,
         status: startingStatus(input.source, items),
+        // A cafe that only uses network couriers offers each agreed delivery at once.
+        offeredAt:
+          offersAtOnce(cafe, input.type) &&
+          startingStatus(input.source, items) === OrderStatus.ACCEPTED
+            ? new Date()
+            : null,
         type: input.type,
         tableId: input.tableId ?? null,
         ...charges,
@@ -275,7 +303,12 @@ export class OrdersService {
       Order,
     ).findAndCount({
       where,
-      relations: { items: true, payments: true, courier: true },
+      relations: {
+        items: true,
+        payments: true,
+        courier: true,
+        networkCourier: true,
+      },
       order: {
         createdAt: 'DESC',
         number: 'DESC',
@@ -317,7 +350,7 @@ export class OrdersService {
       if (to === OrderStatus.PAID) {
         await this.assertWeighed(manager, id);
         const paid = await this.paidSoFar(manager, id);
-        if (paid < order.total) {
+        if (paid < owedToCafe(order)) {
           throw new ConflictException('The order is not fully paid yet');
         }
       }
@@ -331,10 +364,18 @@ export class OrdersService {
           'An order with payments can only be cancelled by someone who takes payments',
         );
       }
+      const offer =
+        to === OrderStatus.ACCEPTED &&
+        !order.offeredAt &&
+        offersAtOnce(
+          await manager.findOneByOrFail(Cafe, { id: cafeId }),
+          order.type,
+        );
       await this.scope(manager, cafeId, Order).update(
         { id },
         {
           status: to,
+          ...(offer && { offeredAt: new Date() }),
           ...(to === OrderStatus.CANCELLED && {
             cancelReason: reason || null,
           }),
@@ -376,6 +417,9 @@ export class OrdersService {
         throw new ConflictException(
           `A ${order.status} order cannot be changed`,
         );
+      }
+      if (order.networkCourierId) {
+        throw new ConflictException('A network courier has taken it');
       }
       if (courierId) {
         const courier = await manager.findOne(User, {
@@ -435,7 +479,12 @@ export class OrdersService {
   async courierOrders(cafeId: string, courierId: string): Promise<Order[]> {
     return this.scope(this.dataSource.manager, cafeId, Order).find({
       where: { courierId, status: Not(In(FINISHED)) },
-      relations: { items: true, payments: true, courier: true },
+      relations: {
+        items: true,
+        payments: true,
+        courier: true,
+        networkCourier: true,
+      },
       order: {
         createdAt: 'ASC',
         items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
@@ -449,9 +498,15 @@ export class OrdersService {
       where: {
         type: OrderType.DELIVERY,
         courierId: IsNull(),
+        networkCourierId: IsNull(),
         status: In(CLAIMABLE),
       },
-      relations: { items: true, payments: true, courier: true },
+      relations: {
+        items: true,
+        payments: true,
+        courier: true,
+        networkCourier: true,
+      },
       order: {
         createdAt: 'ASC',
         items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
@@ -468,7 +523,7 @@ export class OrdersService {
     await this.dataSource.transaction(async (manager) => {
       const order = await this.lock(manager, cafeId, id);
       if (order.type !== OrderType.DELIVERY) throw new NotFoundException();
-      if (order.courierId) {
+      if (order.courierId || order.networkCourierId) {
         throw new ConflictException('Another courier has taken it');
       }
       if (!CLAIMABLE.includes(order.status)) {
@@ -984,7 +1039,12 @@ export class OrdersService {
   ): Promise<Order> {
     const order = await this.scope(manager, cafeId, Order).findOne({
       where: { id },
-      relations: { items: true, payments: true, courier: true },
+      relations: {
+        items: true,
+        payments: true,
+        courier: true,
+        networkCourier: true,
+      },
       order: {
         items: { createdAt: 'ASC', nameSnapshot: 'ASC' },
         payments: { createdAt: 'ASC' },

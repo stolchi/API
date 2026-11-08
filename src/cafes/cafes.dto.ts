@@ -15,7 +15,8 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { OrderType, ServiceMode } from '../common/enums.js';
+import { DeliveryMode, OrderType, ServiceMode } from '../common/enums.js';
+import { LocationDto } from '../orders/orders.dto.js';
 import { MAX_MONEY } from '../common/validation.js';
 
 const trim = ({ value }: { value: unknown }) =>
@@ -156,6 +157,16 @@ export class CafeDto {
   @ApiProperty({ description: "Whole so'm per delivery order." })
   deliveryFee!: number;
 
+  @ApiProperty({ enum: DeliveryMode, enumName: 'DeliveryMode' })
+  deliveryMode!: DeliveryMode;
+
+  @ApiProperty({
+    type: LocationDto,
+    nullable: true,
+    description: 'Where couriers pick orders up.',
+  })
+  location!: LocationDto | null;
+
   @ApiProperty({
     type: TelegramBotStatusDto,
     nullable: true,
@@ -239,4 +250,18 @@ export class UpdateCafeDto {
   @Min(0)
   @Max(MAX_MONEY)
   deliveryFee?: number;
+  @ApiPropertyOptional({
+    enum: DeliveryMode,
+    enumName: 'DeliveryMode',
+    description: 'Network couriers need the cafe on the map.',
+  })
+  @IsOptional()
+  @IsEnum(DeliveryMode)
+  deliveryMode?: DeliveryMode;
+
+  @ApiPropertyOptional({ type: LocationDto, nullable: true })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocationDto)
+  location?: LocationDto | null;
 }

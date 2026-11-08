@@ -9,6 +9,8 @@ import { TelegramBot1794400000000 } from './1794400000000-TelegramBot.js';
 import { SeenOrders1794500000000 } from './1794500000000-SeenOrders.js';
 import { Couriers1794600000000 } from './1794600000000-Couriers.js';
 import { CourierClaims1794700000000 } from './1794700000000-CourierClaims.js';
+import { CourierNetwork1794800000000 } from './1794800000000-CourierNetwork.js';
+import { CourierSettlement1794900000000 } from './1794900000000-CourierSettlement.js';
 
 /** Listed explicitly: glob loading does not work under both `dist` and Vitest. */
 export const ALL_MIGRATIONS: (new () => MigrationInterface)[] = [
@@ -22,4 +24,6 @@ export const ALL_MIGRATIONS: (new () => MigrationInterface)[] = [
   SeenOrders1794500000000,
   Couriers1794600000000,
   CourierClaims1794700000000,
+  CourierNetwork1794800000000,
+  CourierSettlement1794900000000,
 ];

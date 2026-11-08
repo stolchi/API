@@ -4,6 +4,8 @@ import { Category } from './category.entity.js';
 import { OrderItem } from './order-item.entity.js';
 import { Order } from './order.entity.js';
 import { Payment } from './payment.entity.js';
+import { NetworkCourierSession } from './network-courier-session.entity.js';
+import { NetworkCourier } from './network-courier.entity.js';
 import { Product } from './product.entity.js';
 import { RefreshToken } from './refresh-token.entity.js';
 import { StaffRole } from './staff-role.entity.js';
@@ -15,6 +17,8 @@ export {
   Cafe,
   Category,
   OrderItem,
+  NetworkCourier,
+  NetworkCourierSession,
   Order,
   Payment,
   Product,
@@ -37,4 +41,6 @@ export const ALL_ENTITIES = [
   OrderItem,
   Payment,
   TelegramBot,
+  NetworkCourier,
+  NetworkCourierSession,
 ];

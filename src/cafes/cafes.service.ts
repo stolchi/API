@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity.js';
+import { DeliveryMode } from '../common/enums.js';
 import { Cafe } from '../database/entities/cafe.entity.js';
 import { TelegramBot } from '../database/entities/telegram-bot.entity.js';
 import { detectImageType } from '../storage/image-type.js';
@@ -39,6 +40,11 @@ export class CafesService {
       serviceChargePercent: cafe.serviceChargePercent,
       packagingFee: cafe.packagingFee,
       deliveryFee: cafe.deliveryFee,
+      deliveryMode: cafe.deliveryMode,
+      location:
+        cafe.latitude === null || cafe.longitude === null
+          ? null
+          : { latitude: cafe.latitude, longitude: cafe.longitude },
       telegramBot: bot && {
         username: bot.username,
         isActive: bot.isActive,
@@ -51,10 +57,25 @@ export class CafesService {
     };
   }
 
-  async update(cafeId: string, dto: UpdateCafeDto): Promise<CafeDto> {
-    await this.load(cafeId);
+  async update(
+    cafeId: string,
+    { location, ...dto }: UpdateCafeDto,
+  ): Promise<CafeDto> {
+    const before = await this.load(cafeId);
+    const mode = dto.deliveryMode ?? before.deliveryMode;
+    const onMap =
+      location === undefined ? before.latitude !== null : location !== null;
+    if (mode !== DeliveryMode.OWN && !onMap) {
+      throw new BadRequestException(
+        'Network couriers need the cafe on the map',
+      );
+    }
     await this.cafes.update({ id: cafeId }, {
       ...dto,
+      ...(location !== undefined && {
+        latitude: location?.latitude ?? null,
+        longitude: location?.longitude ?? null,
+      }),
       // Validation produces class instances; the jsonb column wants plain values.
       ...(dto.workingHours && {
         workingHours: { ...dto.workingHours } as object,

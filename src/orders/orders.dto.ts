@@ -26,6 +26,7 @@ import {
   OrderType,
   PaymentMethod,
   ProductUnit,
+  Vehicle,
 } from '../common/enums.js';
 import { MAX_GRAMS } from './order-lines.js';
 import {
@@ -430,6 +431,28 @@ export class OrderCourierDto {
   name!: string;
 }
 
+export class OrderNetworkCourierDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty()
+  phone!: string;
+
+  @ApiProperty({ enum: Vehicle, enumName: 'Vehicle' })
+  vehicle!: Vehicle;
+}
+
+export class OfferDto {
+  @ApiProperty({
+    description: 'True puts it out to network couriers; false takes it back.',
+  })
+  @IsBoolean()
+  offered!: boolean;
+}
+
 export class AssignCourierDto {
   @ApiProperty({
     format: 'uuid',
@@ -545,6 +568,17 @@ export class OrderDto extends OrderAmountsDto {
 
   @ApiProperty({ type: OrderCourierDto, nullable: true })
   courier!: OrderCourierDto | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'When it was put out to network couriers.',
+  })
+  offeredAt!: Date | null;
+
+  @ApiProperty({ type: OrderNetworkCourierDto, nullable: true })
+  networkCourier!: OrderNetworkCourierDto | null;
 
   @ApiProperty()
   paidAmount!: number;

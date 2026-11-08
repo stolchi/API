@@ -66,6 +66,23 @@ function itemLines(order: Order): string {
     .join('\n');
 }
 
+/** A network courier on the way, with a name to expect and a number to call. */
+function etaNotice(order: Order): string | null {
+  if (!order.deliveryEta) return null;
+  const minutes = Math.max(
+    1,
+    Math.round((order.deliveryEta.getTime() - Date.now()) / 60_000),
+  );
+  return [
+    `🚚 Buyurtmangiz <b>#${displayNumberOf(order)}</b> yo'lda.`,
+    order.networkCourier &&
+      `Kuryer: ${escape(order.networkCourier.name)}, ${order.networkCourier.phone}`,
+    `Taxminan <b>${minutes} daqiqada</b> (${tashkentClock(order.deliveryEta)} gacha) yetkazadi.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /** What the customer is told when their order reaches a status, if anything. */
 function customerNotice(order: Order): string | null {
   const number = `<b>#${displayNumberOf(order)}</b>`;
@@ -345,6 +362,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (!order.telegramUserId) return;
+    if (event.kind === 'eta') {
+      const notice = etaNotice(order);
+      if (notice) {
+        await this.api.sendMessage(token, order.telegramUserId, notice);
+      }
+      return;
+    }
     if (event.kind === 'status') {
       const notice = customerNotice(order);
       if (notice) {

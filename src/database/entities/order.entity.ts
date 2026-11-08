@@ -11,6 +11,7 @@ import {
 import type { Relation } from 'typeorm';
 import { OrderSource, OrderStatus, OrderType } from '../../common/enums.js';
 import { CafeTable } from './cafe-table.entity.js';
+import { NetworkCourier } from './network-courier.entity.js';
 import { OrderItem } from './order-item.entity.js';
 import { Payment } from './payment.entity.js';
 import { TenantEntity } from './tenant.entity.js';
@@ -20,6 +21,10 @@ import { User } from './user.entity.js';
 @Index(['cafeId', 'businessDate', 'number'], { unique: true })
 @Index(['cafeId', 'status'])
 @Check('CHK_orders_total_not_negative', `"total" >= 0`)
+@Check(
+  'CHK_orders_one_courier',
+  `"courierId" IS NULL OR "networkCourierId" IS NULL`,
+)
 @Check(
   'CHK_orders_location_whole',
   `("latitude" IS NULL) = ("longitude" IS NULL)`,
@@ -80,6 +85,29 @@ export class Order extends TenantEntity {
   /** When the courier expects to hand it over, set as they leave with it. */
   @Column({ type: 'timestamptz', nullable: true })
   deliveryEta!: Date | null;
+
+  /** When the cafe put it out to network couriers. Empty: only its own can take it. */
+  @Column({ type: 'timestamptz', nullable: true })
+  offeredAt!: Date | null;
+
+  /** The network courier who took it. Exclusive with `courierId`. */
+  @Index('IDX_orders_networkCourierId')
+  @Column({ type: 'uuid', nullable: true })
+  networkCourierId!: string | null;
+
+  @ManyToOne(() => NetworkCourier, { onDelete: 'SET NULL' })
+  @JoinColumn({
+    name: 'networkCourierId',
+    foreignKeyConstraintName: 'FK_orders_networkCourierId',
+  })
+  networkCourier?: Relation<NetworkCourier> | null;
+
+  /**
+   * Settled with a network courier at hand-over: above zero they paid the cafe (a
+   * payment, though not the customer's money), below zero the cafe paid them.
+   */
+  @Column({ type: 'integer', nullable: true })
+  courierSettlement!: number | null;
 
   /** The cafe's own courier taking it, for a delivery. */
   @Index('IDX_orders_courierId')

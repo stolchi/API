@@ -42,7 +42,9 @@ export async function createTestApp(): Promise<NestExpressApplication> {
 }
 
 export async function resetDatabase(app: INestApplication): Promise<void> {
-  await app.get(DataSource).query('TRUNCATE TABLE "cafes", "users" CASCADE');
+  await app
+    .get(DataSource)
+    .query('TRUNCATE TABLE "cafes", "users", "network_couriers" CASCADE');
 }
 
 let phoneCounter = 0;

@@ -38,11 +38,13 @@ import {
   CreateOrderDto,
   ListOrdersQueryDto,
   MoveOrderDto,
+  OfferDto,
   OrderDto,
   OrderPageDto,
   UpdateOrderCustomerDto,
   UpdateOrderItemsDto,
 } from './orders.dto.js';
+import { NetworkOrdersService } from './network-orders.service.js';
 import { OrdersService, toOrderDto } from './orders.service.js';
 
 @ApiTags('orders')
@@ -50,7 +52,10 @@ import { OrdersService, toOrderDto } from './orders.service.js';
 @RequireAny(Permission.ORDERS_VIEW, Permission.KITCHEN_WORK)
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly network: NetworkOrdersService,
+  ) {}
 
   @Post()
   @RequireAny(Permission.ORDERS_CREATE)
@@ -123,6 +128,37 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<OrderDto> {
     return toOrderDto(await this.orders.markSeen(cafeId, id));
+  }
+
+  @Patch(':id/offer')
+  @RequireAny(Permission.ORDERS_EDIT)
+  @ApiOperation({
+    summary: 'Put a delivery out to network couriers, or take it back',
+  })
+  @ApiOkResponse({ type: OrderDto })
+  async offer(
+    @CurrentCafe() cafeId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: OfferDto,
+  ): Promise<OrderDto> {
+    return toOrderDto(await this.network.offer(cafeId, id, dto.offered));
+  }
+
+  @Post(':id/hand-over')
+  @RequireAny(Permission.ORDERS_SERVE)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Handed to the network courier, settling up with them',
+  })
+  @ApiOkResponse({ type: OrderDto })
+  async handOver(
+    @CurrentCafe() cafeId: string,
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<OrderDto> {
+    return toOrderDto(
+      await this.network.handOver(cafeId, id, user.permissions),
+    );
   }
 
   @Patch(':id/courier')

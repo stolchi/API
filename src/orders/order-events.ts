@@ -6,7 +6,9 @@ import type { Order } from '../database/entities/order.entity.js';
 export type OrderEvent =
   | { kind: 'created'; order: Order }
   | { kind: 'status'; order: Order; from: Order['status'] }
-  | { kind: 'changed'; order: Order };
+  | { kind: 'changed'; order: Order }
+  /** A courier on the way said when they will arrive. */
+  | { kind: 'eta'; order: Order };
 
 /**
  * Told after the transaction commits. A listener's failure (Telegram being down, say)

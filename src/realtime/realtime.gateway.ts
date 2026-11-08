@@ -21,6 +21,8 @@ export const screenRoom = (cafeId: string) => `screen:${cafeId}`;
 const userRoom = (userId: string) => `user:${userId}`;
 /** Couriers hear that deliveries changed, never what is in them. */
 export const couriersRoom = (cafeId: string) => `couriers:${cafeId}`;
+/** Every courier of the network: they hear that offers changed, never what is in them. */
+export const NETWORK_ROOM = 'network';
 
 /**
  * Rooms are chosen by the server from the credentials given at connection time.
@@ -109,8 +111,16 @@ export class RealtimeGateway implements OnGatewayInit {
 
   /** A delivery changed: every courier of the cafe reads their lists again. */
   private notifyCouriers(cafeId: string, order: unknown): void {
-    if ((order as { type?: unknown }).type === 'DELIVERY') {
-      this.server.to(couriersRoom(cafeId)).emit('courier.changed');
+    const delivery = order as {
+      type?: unknown;
+      offeredAt?: unknown;
+      networkCourier?: unknown;
+    };
+    if (delivery.type !== 'DELIVERY') return;
+    this.server.to(couriersRoom(cafeId)).emit('courier.changed');
+    // Offered to the network, or taken from it: network couriers look again.
+    if (delivery.offeredAt || delivery.networkCourier) {
+      this.server.to(NETWORK_ROOM).emit('network.changed');
     }
   }
 
@@ -125,11 +135,25 @@ export class RealtimeGateway implements OnGatewayInit {
   }
 
   private async authenticate(socket: Socket): Promise<void> {
-    const { token, orderToken, screen } = socket.handshake.auth as {
+    const { token, orderToken, screen, networkToken } = socket.handshake
+      .auth as {
       token?: unknown;
       orderToken?: unknown;
       screen?: unknown;
+      networkToken?: unknown;
     };
+
+    if (typeof networkToken === 'string') {
+      const payload = await this.jwt.verifyAsync<{
+        sub: string;
+        kind?: string;
+        exp: number;
+      }>(networkToken);
+      if (payload.kind !== 'network-courier') throw new Error('Not a courier');
+      await socket.join(NETWORK_ROOM);
+      this.disconnectAtExpiry(socket, payload.exp);
+      return;
+    }
 
     if (typeof token === 'string') {
       const payload = await this.jwt.verifyAsync<

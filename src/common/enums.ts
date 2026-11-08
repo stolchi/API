@@ -49,3 +49,21 @@ export enum ProductUnit {
   PIECE = 'PIECE',
   KG = 'KG',
 }
+
+/** Who carries a cafe's deliveries. */
+export enum DeliveryMode {
+  /** Its own couriers, who are its staff. */
+  OWN = 'OWN',
+  /** Couriers from the shared network, anyone signed up on the courier site. */
+  NETWORK = 'NETWORK',
+  /** Its own first; the operator can put an order out to the network too. */
+  BOTH = 'BOTH',
+}
+
+/** How a network courier gets around: it tells the cafe what to expect. */
+export enum Vehicle {
+  FOOT = 'FOOT',
+  BICYCLE = 'BICYCLE',
+  MOTORBIKE = 'MOTORBIKE',
+  CAR = 'CAR',
+}

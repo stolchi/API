@@ -1,11 +1,15 @@
 import { Check, Column, Entity, Index } from 'typeorm';
-import { OrderType, ServiceMode } from '../../common/enums.js';
+import { DeliveryMode, OrderType, ServiceMode } from '../../common/enums.js';
 import { AppBaseEntity } from './base.entity.js';
 
 @Entity('cafes')
 @Check(
   'CHK_cafes_service_charge_range',
   `"serviceChargePercent" BETWEEN 0 AND 50`,
+)
+@Check(
+  'CHK_cafes_location_whole',
+  `("latitude" IS NULL) = ("longitude" IS NULL)`,
 )
 @Check(
   'CHK_cafes_fees_not_negative',
@@ -67,4 +71,15 @@ export class Cafe extends AppBaseEntity {
   /** Whole so'm per delivery order. */
   @Column({ type: 'integer', default: 0 })
   deliveryFee!: number;
+
+  /** Who carries its deliveries. Network couriers need the cafe on the map. */
+  @Column({ type: 'varchar', length: 10, default: DeliveryMode.OWN })
+  deliveryMode!: DeliveryMode;
+
+  /** Where couriers pick orders up. Both or neither. */
+  @Column({ type: 'double precision', nullable: true })
+  latitude!: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  longitude!: number | null;
 }
