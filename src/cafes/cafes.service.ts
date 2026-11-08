@@ -44,6 +44,11 @@ export class CafesService {
       phone: cafe.phone,
       address: cafe.address,
       workingHours: cafe.workingHours as WorkingHoursDto | null,
+      serviceMode: cafe.serviceMode,
+      orderTypes: cafe.orderTypes,
+      serviceChargePercent: cafe.serviceChargePercent,
+      packagingFee: cafe.packagingFee,
+      deliveryFee: cafe.deliveryFee,
       telegramBot: bot && { username: bot.username, isActive: bot.isActive },
     };
   }

@@ -298,6 +298,9 @@ describe('Orders (e2e)', () => {
     });
 
     it('holds a Telegram delivery until someone accepts it', async () => {
+      await send(cafeA.token, 'patch', '/cafes/current')
+        .send({ orderTypes: ['DINE_IN', 'TAKEAWAY', 'DELIVERY'] })
+        .expect(200);
       const { id, status, number } = await app
         .get(OrdersService)
         .create(cafeA.cafeId, {

@@ -1,14 +1,22 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsEnum,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
   Length,
   Matches,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
+import { OrderType, ServiceMode } from '../common/enums.js';
+import { MAX_MONEY } from '../common/validation.js';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -114,6 +122,21 @@ export class CafeDto {
   @ApiProperty({ type: WorkingHoursDto, nullable: true })
   workingHours!: WorkingHoursDto | null;
 
+  @ApiProperty({ enum: ServiceMode, enumName: 'ServiceMode' })
+  serviceMode!: ServiceMode;
+
+  @ApiProperty({ enum: OrderType, enumName: 'OrderType', isArray: true })
+  orderTypes!: OrderType[];
+
+  @ApiProperty({ minimum: 0, maximum: 50 })
+  serviceChargePercent!: number;
+
+  @ApiProperty({ description: "Whole so'm per takeaway or delivery order." })
+  packagingFee!: number;
+
+  @ApiProperty({ description: "Whole so'm per delivery order." })
+  deliveryFee!: number;
+
   @ApiProperty({
     type: TelegramBotStatusDto,
     nullable: true,
@@ -159,6 +182,44 @@ export class UpdateCafeDto {
   @ValidateNested()
   @Type(() => WorkingHoursDto)
   workingHours?: WorkingHoursDto | null;
+
+  @ApiPropertyOptional({ enum: ServiceMode, enumName: 'ServiceMode' })
+  @IsOptional()
+  @IsEnum(ServiceMode)
+  serviceMode?: ServiceMode;
+
+  @ApiPropertyOptional({
+    enum: OrderType,
+    enumName: 'OrderType',
+    isArray: true,
+    description: 'At least one.',
+  })
+  @IsOptional()
+  @IsEnum(OrderType, { each: true })
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  orderTypes?: OrderType[];
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 50 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(50)
+  serviceChargePercent?: number;
+
+  @ApiPropertyOptional({ minimum: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_MONEY)
+  packagingFee?: number;
+
+  @ApiPropertyOptional({ minimum: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_MONEY)
+  deliveryFee?: number;
 }
 
 export class SetTelegramBotDto {

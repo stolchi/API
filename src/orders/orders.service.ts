@@ -24,12 +24,14 @@ import { Permission } from '../common/permissions.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { MAX_MONEY } from '../common/validation.js';
 import { CafeTable } from '../database/entities/cafe-table.entity.js';
+import { Cafe } from '../database/entities/cafe.entity.js';
 import { OrderItem } from '../database/entities/order-item.entity.js';
 import { Order } from '../database/entities/order.entity.js';
 import { Payment } from '../database/entities/payment.entity.js';
 import { Product } from '../database/entities/product.entity.js';
 import type { TenantEntity } from '../database/entities/tenant.entity.js';
 import { RealtimeGateway } from '../realtime/realtime.gateway.js';
+import { chargesFor, totalsOf } from './charges.js';
 import { displayNumberOf } from './order-number.js';
 import { canTransition, maySetStatus } from './order-status.js';
 import type {
@@ -64,6 +66,21 @@ function paidAmountOf(order: Order): number {
   return (order.payments ?? []).reduce((sum, p) => sum + p.amount, 0);
 }
 
+const itemsTotalOf = (
+  items: readonly { priceSnapshot: number; quantity: number }[],
+): number =>
+  items.reduce((sum, item) => sum + item.priceSnapshot * item.quantity, 0);
+
+/** The charges an order keeps from when it was placed. */
+export const amountsOf = (order: Order) => ({
+  itemsTotal: itemsTotalOf(order.items ?? []),
+  serviceChargePercent: order.serviceChargePercent,
+  serviceCharge: order.serviceCharge,
+  packagingFee: order.packagingFee,
+  deliveryFee: order.deliveryFee,
+  total: order.total,
+});
+
 export function toOrderDto(order: Order): OrderDto {
   return {
     id: order.id,
@@ -76,7 +93,7 @@ export function toOrderDto(order: Order): OrderDto {
     tableId: order.tableId,
     customerName: order.customerName,
     customerPhone: order.customerPhone,
-    total: order.total,
+    ...amountsOf(order),
     paidAmount: paidAmountOf(order),
     note: order.note,
     createdById: order.createdById,
@@ -111,6 +128,13 @@ export class OrdersService {
     this.assertTypeRules(input);
 
     const orderId = await this.dataSource.transaction(async (manager) => {
+      const cafe = await manager.findOneBy(Cafe, { id: cafeId });
+      if (!cafe) throw new NotFoundException();
+      if (!cafe.orderTypes.includes(input.type)) {
+        throw new ConflictException(
+          `This cafe does not take ${input.type} orders`,
+        );
+      }
       if (input.tableId) {
         const tables = await this.scope(manager, cafeId, CafeTable).count({
           id: input.tableId,
@@ -119,10 +143,8 @@ export class OrdersService {
       }
 
       const items = await this.priceItems(manager, cafeId, input.items);
-      const total = items.reduce(
-        (sum, item) => sum + item.priceSnapshot * item.quantity,
-        0,
-      );
+      const charges = chargesFor(input.type, cafe);
+      const { serviceCharge, total } = totalsOf(itemsTotalOf(items), charges);
       if (total > MAX_MONEY)
         throw new BadRequestException('Order is too large');
 
@@ -139,6 +161,8 @@ export class OrdersService {
             : OrderStatus.ACCEPTED,
         type: input.type,
         tableId: input.tableId ?? null,
+        ...charges,
+        serviceCharge,
         total,
         note: input.note ?? null,
         customerName: input.customerName ?? null,
@@ -305,9 +329,11 @@ export class OrdersService {
         }
         const priced = await this.priceItems(manager, cafeId, fresh);
 
-        const total =
+        const itemsTotal =
           kept.reduce((sum, i) => sum + i.priceSnapshot * i.next.quantity, 0) +
-          priced.reduce((sum, i) => sum + i.priceSnapshot * i.quantity, 0);
+          itemsTotalOf(priced);
+        // The order keeps its own rates; only the service charge follows the food.
+        const { serviceCharge, total } = totalsOf(itemsTotal, order);
         if (total > MAX_MONEY) {
           throw new BadRequestException('Order is too large');
         }
@@ -362,7 +388,11 @@ export class OrdersService {
             order.status === OrderStatus.SERVED);
         await this.scope(manager, cafeId, Order).update(
           { id },
-          { total, ...(backToKitchen && { status: OrderStatus.COOKING }) },
+          {
+            total,
+            serviceCharge,
+            ...(backToKitchen && { status: OrderStatus.COOKING }),
+          },
         );
         return { before: order.status, added };
       },

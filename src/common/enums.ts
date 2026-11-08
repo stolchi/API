@@ -34,3 +34,11 @@ export enum PaymentMethod {
   CLICK = 'CLICK',
   PAYME = 'PAYME',
 }
+
+/** How food reaches the customer, which decides who hears that an order is ready. */
+export enum ServiceMode {
+  /** A waiter takes the order and carries it to the table; the bill comes after. */
+  TABLE_SERVICE = 'TABLE_SERVICE',
+  /** Customers pay at the counter, watch the screen and collect it themselves. */
+  SELF_SERVICE = 'SELF_SERVICE',
+}

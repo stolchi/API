@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { OrderStatus, OrderType } from '../common/enums.js';
-import { OrderContentDto } from '../orders/orders.dto.js';
+import { OrderAmountsDto, OrderContentDto } from '../orders/orders.dto.js';
 
 export class CreatePublicOrderDto extends OrderContentDto {
   @ApiProperty({ enum: [OrderType.DINE_IN, OrderType.TAKEAWAY] })
@@ -45,6 +45,23 @@ export class PublicCafeDto {
 
   @ApiProperty()
   currency!: string;
+
+  @ApiProperty({
+    enum: OrderType,
+    enumName: 'OrderType',
+    isArray: true,
+    description: 'The kinds of order the cafe takes.',
+  })
+  orderTypes!: OrderType[];
+
+  @ApiProperty({ description: 'Added to dine-in orders.' })
+  serviceChargePercent!: number;
+
+  @ApiProperty({ description: "Whole so'm per takeaway or delivery order." })
+  packagingFee!: number;
+
+  @ApiProperty({ description: "Whole so'm per delivery order." })
+  deliveryFee!: number;
 }
 
 export class PublicProductDto {
@@ -112,7 +129,7 @@ export class PublicOrderItemDto {
 }
 
 /** All a holder of the public token may see: no customer details, staff or payments. */
-export class PublicOrderDto {
+export class PublicOrderDto extends OrderAmountsDto {
   @ApiProperty({
     format: 'uuid',
     description: 'Use for the status page and the socket connection.',
@@ -130,9 +147,6 @@ export class PublicOrderDto {
 
   @ApiProperty({ enum: OrderType, enumName: 'OrderType' })
   type!: OrderType;
-
-  @ApiProperty()
-  total!: number;
 
   @ApiProperty()
   createdAt!: Date;

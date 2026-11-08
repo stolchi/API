@@ -55,9 +55,25 @@ export class Order extends TenantEntity {
   @Column({ type: 'bigint', nullable: true })
   telegramUserId!: string | null;
 
-  /** Whole so'm. */
+  /** Whole so'm: the items plus the charges below. */
   @Column({ type: 'integer', default: 0 })
   total!: number;
+
+  /** The cafe's rate when the order was placed, so a later change leaves it alone. */
+  @Column({ type: 'smallint', default: 0 })
+  serviceChargePercent!: number;
+
+  /** Whole so'm, worked out from the items and `serviceChargePercent`. */
+  @Column({ type: 'integer', default: 0 })
+  serviceCharge!: number;
+
+  /** Whole so'm, for the containers of a takeaway or delivery. */
+  @Column({ type: 'integer', default: 0 })
+  packagingFee!: number;
+
+  /** Whole so'm. */
+  @Column({ type: 'integer', default: 0 })
+  deliveryFee!: number;
 
   @Column({ type: 'text', nullable: true })
   note!: string | null;

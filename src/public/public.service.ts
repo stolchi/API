@@ -13,7 +13,7 @@ import { Category } from '../database/entities/category.entity.js';
 import { Order } from '../database/entities/order.entity.js';
 import { Product } from '../database/entities/product.entity.js';
 import { displayNumberOf } from '../orders/order-number.js';
-import { OrdersService } from '../orders/orders.service.js';
+import { amountsOf, OrdersService } from '../orders/orders.service.js';
 import type {
   CreatePublicOrderDto,
   PublicMenuDto,
@@ -34,7 +34,7 @@ function toPublicOrderDto(order: Order): PublicOrderDto {
     displayNumber: displayNumberOf(order),
     status: order.status,
     type: order.type,
-    total: order.total,
+    ...amountsOf(order),
     createdAt: order.createdAt,
     items: (order.items ?? []).map((item) => ({
       name: item.nameSnapshot,
@@ -88,6 +88,10 @@ export class PublicService {
         address: cafe.address,
         workingHours: cafe.workingHours,
         currency: cafe.currency,
+        orderTypes: cafe.orderTypes,
+        serviceChargePercent: cafe.serviceChargePercent,
+        packagingFee: cafe.packagingFee,
+        deliveryFee: cafe.deliveryFee,
       },
       categories: categories.map((category) => ({
         id: category.id,

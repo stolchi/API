@@ -282,7 +282,28 @@ export class PaymentDto {
   createdAt!: Date;
 }
 
-export class OrderDto {
+/** What an order costs, line by line: `total` is the items plus the charges. */
+export class OrderAmountsDto {
+  @ApiProperty({ description: "Whole so'm: the items alone." })
+  itemsTotal!: number;
+
+  @ApiProperty({ description: 'Of the items, for dine-in orders.' })
+  serviceChargePercent!: number;
+
+  @ApiProperty()
+  serviceCharge!: number;
+
+  @ApiProperty()
+  packagingFee!: number;
+
+  @ApiProperty()
+  deliveryFee!: number;
+
+  @ApiProperty()
+  total!: number;
+}
+
+export class OrderDto extends OrderAmountsDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
@@ -315,9 +336,6 @@ export class OrderDto {
 
   @ApiProperty({ type: String, nullable: true })
   customerPhone!: string | null;
-
-  @ApiProperty()
-  total!: number;
 
   @ApiProperty()
   paidAmount!: number;
