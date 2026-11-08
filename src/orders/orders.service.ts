@@ -19,6 +19,7 @@ import {
   OrderStatus,
   OrderType,
   PaymentMethod,
+  ProductUnit,
 } from '../common/enums.js';
 import { Permission } from '../common/permissions.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
@@ -32,6 +33,7 @@ import { Product } from '../database/entities/product.entity.js';
 import type { TenantEntity } from '../database/entities/tenant.entity.js';
 import { RealtimeGateway } from '../realtime/realtime.gateway.js';
 import { chargesFor, totalsOf } from './charges.js';
+import { itemsTotalOf, maxQuantityOf } from './order-lines.js';
 import { displayNumberOf } from './order-number.js';
 import { canTransition, maySetStatus } from './order-status.js';
 import type {
@@ -55,6 +57,20 @@ export interface CreateOrderInput {
 
 const FINISHED = [OrderStatus.PAID, OrderStatus.CANCELLED];
 
+/**
+ * A Telegram order is a delivery, which someone confirms by phone first. Orders from
+ * staff or a table's QR go straight to work, and with nothing to cook they are ready.
+ */
+function startingStatus(
+  source: OrderSource,
+  items: readonly { sendsToKitchen: boolean }[],
+): OrderStatus {
+  if (source === OrderSource.TELEGRAM) return OrderStatus.NEW;
+  return items.some((item) => item.sendsToKitchen)
+    ? OrderStatus.ACCEPTED
+    : OrderStatus.READY;
+}
+
 /** Once the kitchen has started, whatever is added must reach it as something new. */
 const STARTED: readonly OrderStatus[] = [
   OrderStatus.COOKING,
@@ -65,11 +81,6 @@ const STARTED: readonly OrderStatus[] = [
 function paidAmountOf(order: Order): number {
   return (order.payments ?? []).reduce((sum, p) => sum + p.amount, 0);
 }
-
-const itemsTotalOf = (
-  items: readonly { priceSnapshot: number; quantity: number }[],
-): number =>
-  items.reduce((sum, item) => sum + item.priceSnapshot * item.quantity, 0);
 
 /** The charges an order keeps from when it was placed. */
 export const amountsOf = (order: Order) => ({
@@ -102,9 +113,13 @@ export function toOrderDto(order: Order): OrderDto {
     items: (order.items ?? []).map((item) => ({
       id: item.id,
       productId: item.productId,
+      variantId: item.variantId,
       name: item.nameSnapshot,
       price: item.priceSnapshot,
+      unit: item.unit,
       quantity: item.quantity,
+      weighed: item.weighed,
+      sendsToKitchen: item.sendsToKitchen,
       note: item.note,
       addedQuantity: item.addedQuantity,
     })),
@@ -142,7 +157,13 @@ export class OrdersService {
         if (tables === 0) throw new BadRequestException('Unknown table');
       }
 
-      const items = await this.priceItems(manager, cafeId, input.items);
+      // Staff weigh as they take the order; a customer can only guess.
+      const items = await this.priceItems(
+        manager,
+        cafeId,
+        input.items,
+        input.source === OrderSource.POS,
+      );
       const charges = chargesFor(input.type, cafe);
       const { serviceCharge, total } = totalsOf(itemsTotalOf(items), charges);
       if (total > MAX_MONEY)
@@ -153,12 +174,7 @@ export class OrdersService {
         number: await this.nextNumber(manager, cafeId, businessDate),
         businessDate,
         source: input.source,
-        // A Telegram order is a delivery, which someone confirms by phone first.
-        // Orders from staff or a table's QR go straight to work.
-        status:
-          input.source === OrderSource.TELEGRAM
-            ? OrderStatus.NEW
-            : OrderStatus.ACCEPTED,
+        status: startingStatus(input.source, items),
         type: input.type,
         tableId: input.tableId ?? null,
         ...charges,
@@ -248,6 +264,7 @@ export class OrdersService {
         );
       }
       if (to === OrderStatus.PAID) {
+        await this.assertWeighed(manager, id);
         const paid = await this.paidSoFar(manager, id);
         if (paid < order.total) {
           throw new ConflictException('The order is not fully paid yet');
@@ -320,6 +337,7 @@ export class OrdersService {
           } else if (line.productId) {
             fresh.push({
               productId: line.productId,
+              variantId: line.variantId,
               quantity: line.quantity,
               note: line.note,
             });
@@ -327,11 +345,17 @@ export class OrdersService {
             throw new BadRequestException('A new line needs a product');
           }
         }
-        const priced = await this.priceItems(manager, cafeId, fresh);
+        for (const item of kept) {
+          if (item.next.quantity > maxQuantityOf(item.unit)) {
+            throw new BadRequestException(`Too much of "${item.nameSnapshot}"`);
+          }
+        }
+        const priced = await this.priceItems(manager, cafeId, fresh, true);
 
         const itemsTotal =
-          kept.reduce((sum, i) => sum + i.priceSnapshot * i.next.quantity, 0) +
-          itemsTotalOf(priced);
+          itemsTotalOf(
+            kept.map((item) => ({ ...item, quantity: item.next.quantity })),
+          ) + itemsTotalOf(priced);
         // The order keeps its own rates; only the service charge follows the food.
         const { serviceCharge, total } = totalsOf(itemsTotal, order);
         if (total > MAX_MONEY) {
@@ -352,15 +376,21 @@ export class OrdersService {
           );
         }
 
+        // Only food for the kitchen sends an order back there.
         let added = 0;
         for (const item of kept) {
           const growth = Math.max(0, item.next.quantity - item.quantity);
-          if (started) added += growth;
+          if (started && item.sendsToKitchen) added += growth;
           await manager.update(
             OrderItem,
             { id: item.id, orderId: id },
             {
               quantity: item.next.quantity,
+              // Staff changing a weight have put it on the scales.
+              weighed:
+                item.weighed ||
+                item.next.weighed === true ||
+                item.next.quantity !== item.quantity,
               note: item.next.note ?? null,
               addedQuantity: started
                 ? Math.min(item.addedQuantity + growth, item.next.quantity)
@@ -378,7 +408,9 @@ export class OrdersService {
             })),
           );
           if (started) {
-            added += priced.reduce((sum, item) => sum + item.quantity, 0);
+            added += priced
+              .filter((item) => item.sendsToKitchen)
+              .reduce((sum, item) => sum + item.quantity, 0);
           }
         }
 
@@ -456,6 +488,7 @@ export class OrdersService {
           `A ${order.status} order cannot take payments`,
         );
       }
+      await this.assertWeighed(manager, id);
       const unpaid = order.total - (await this.paidSoFar(manager, id));
       const amount = payments.reduce((sum, item) => sum + item.amount, 0);
       if (amount > unpaid) {
@@ -490,11 +523,15 @@ export class OrdersService {
     }
   }
 
-  /** Name and price are copied here, so later menu edits cannot change this order. */
+  /**
+   * Name and price are copied here, so later menu edits cannot change this order.
+   * `weighed`: whoever orders has the scales, so a weight given is the real one.
+   */
   private async priceItems(
     manager: EntityManager,
     cafeId: string,
     items: CreateOrderItemDto[],
+    weighed: boolean,
   ) {
     const ids = [...new Set(items.map((item) => item.productId))];
     const products = await this.scope(manager, cafeId, Product).find({
@@ -511,11 +548,26 @@ export class OrdersService {
       if (!product.isAvailable || !product.category?.isActive) {
         throw new ConflictException(`"${product.name}" is not available`);
       }
+      if (item.quantity > maxQuantityOf(product.unit)) {
+        throw new BadRequestException(`Too much of "${product.name}"`);
+      }
+      const variant = product.variants.find(({ id }) => id === item.variantId);
+      if (product.variants.length > 0 ? !variant : item.variantId) {
+        throw new BadRequestException(
+          `Choose one of the sizes of "${product.name}"`,
+        );
+      }
       return {
         productId: product.id,
-        nameSnapshot: product.name,
-        priceSnapshot: product.price,
+        variantId: variant?.id ?? null,
+        nameSnapshot: variant
+          ? `${product.name} (${variant.name})`
+          : product.name,
+        priceSnapshot: variant?.price ?? product.price,
+        unit: product.unit,
         quantity: item.quantity,
+        weighed: weighed || product.unit !== ProductUnit.KG,
+        sendsToKitchen: product.sendsToKitchen,
         note: item.note ?? null,
       };
     });
@@ -537,6 +589,15 @@ export class OrdersService {
       take: 1,
     });
     return (last?.number ?? 0) + 1;
+  }
+
+  /** A guessed weight is not a price yet: it has to be weighed before money is taken. */
+  private async assertWeighed(manager: EntityManager, orderId: string) {
+    if (
+      await manager.exists(OrderItem, { where: { orderId, weighed: false } })
+    ) {
+      throw new ConflictException('Some items still need weighing');
+    }
   }
 
   private async paidSoFar(manager: EntityManager, orderId: string) {

@@ -44,6 +44,8 @@ class DashboardDto {
   topProducts!: TopProductDto[];
 }
 
+const SOLD = `SUM(CASE WHEN item.unit = 'KG' THEN 1 ELSE item.quantity END)`;
+
 @Injectable()
 class DashboardService {
   private readonly orders: TenantRepository<Order>;
@@ -79,14 +81,15 @@ class DashboardService {
         .innerJoin('order.items', 'item')
         .select('item.productId', 'productId')
         .addSelect('item.nameSnapshot', 'name')
-        .addSelect('SUM(item.quantity)', 'quantity')
+        // A weighed line counts once: its quantity is grams, not portions.
+        .addSelect(SOLD, 'quantity')
         .andWhere('order.businessDate = :date', { date })
         .andWhere('order.status <> :cancelled', {
           cancelled: OrderStatus.CANCELLED,
         })
         .groupBy('item.productId')
         .addGroupBy('item.nameSnapshot')
-        .orderBy('SUM(item.quantity)', 'DESC')
+        .orderBy(SOLD, 'DESC')
         .addOrderBy('item.nameSnapshot', 'ASC')
         .limit(5)
         .getRawMany<{

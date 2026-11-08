@@ -4,15 +4,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
+import { ProductUnit } from '../common/enums.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { Category } from '../database/entities/category.entity.js';
-import { Product } from '../database/entities/product.entity.js';
+import {
+  Product,
+  type ProductVariant,
+} from '../database/entities/product.entity.js';
 import { RealtimeGateway } from '../realtime/realtime.gateway.js';
 import { detectImageType } from '../storage/image-type.js';
 import { StorageService } from '../storage/storage.service.js';
 import type {
   CreateProductDto,
+  ProductVariantDto,
   ListProductsQueryDto,
   ProductDto,
   UpdateProductDto,
@@ -24,10 +30,45 @@ export const toProductDto = (product: Product): ProductDto => ({
   name: product.name,
   description: product.description,
   price: product.price,
+  unit: product.unit,
+  variants: product.variants,
+  sendsToKitchen: product.sendsToKitchen,
   imageUrl: product.imageUrl,
   isAvailable: product.isAvailable,
   sortOrder: product.sortOrder,
 });
+
+/**
+ * Sizes keep their ids across edits, so a cart holding one still finds it. With sizes,
+ * the product's own price is the cheapest of them. A weighed product has no sizes.
+ */
+function sizing(
+  unit: ProductUnit,
+  wanted: readonly ProductVariantDto[],
+  existing: readonly ProductVariant[],
+  price: number,
+): { variants: ProductVariant[]; price: number } {
+  if (unit === ProductUnit.KG && wanted.length > 0) {
+    throw new BadRequestException('A product sold by weight has no sizes');
+  }
+  const known = new Set(existing.map((variant) => variant.id));
+  const ids = wanted.flatMap((variant) => (variant.id ? [variant.id] : []));
+  if (new Set(ids).size !== ids.length || ids.some((id) => !known.has(id))) {
+    throw new BadRequestException('Unknown or repeated size');
+  }
+  const variants = wanted.map((variant) => ({
+    id: variant.id ?? randomUUID(),
+    name: variant.name.trim(),
+    price: variant.price,
+  }));
+  return {
+    variants,
+    price:
+      variants.length > 0
+        ? Math.min(...variants.map((variant) => variant.price))
+        : price,
+  };
+}
 
 @Injectable()
 export class ProductsService {
@@ -61,7 +102,17 @@ export class ProductsService {
 
   async create(cafeId: string, dto: CreateProductDto): Promise<ProductDto> {
     await this.assertCategory(cafeId, dto.categoryId);
-    return toProductDto(await this.products.forCafe(cafeId).create({ ...dto }));
+    return toProductDto(
+      await this.products.forCafe(cafeId).create({
+        ...dto,
+        ...sizing(
+          dto.unit ?? ProductUnit.PIECE,
+          dto.variants ?? [],
+          [],
+          dto.price,
+        ),
+      }),
+    );
   }
 
   async update(
@@ -71,7 +122,18 @@ export class ProductsService {
   ): Promise<ProductDto> {
     const before = await this.load(cafeId, id);
     if (dto.categoryId) await this.assertCategory(cafeId, dto.categoryId);
-    await this.products.forCafe(cafeId).update({ id }, { ...dto });
+    await this.products.forCafe(cafeId).update(
+      { id },
+      {
+        ...dto,
+        ...sizing(
+          dto.unit ?? before.unit,
+          dto.variants ?? before.variants,
+          before.variants,
+          dto.price ?? before.price,
+        ),
+      },
+    );
     const after = await this.load(cafeId, id);
     if (before.isAvailable !== after.isAvailable) {
       this.announceAvailability(after);

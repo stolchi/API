@@ -22,7 +22,9 @@ import {
   OrderStatus,
   OrderType,
   PaymentMethod,
+  ProductUnit,
 } from '../common/enums.js';
+import { MAX_GRAMS } from './order-lines.js';
 import {
   MAX_MONEY,
   PHONE_MESSAGE,
@@ -34,10 +36,22 @@ export class CreateOrderItemDto {
   @IsUUID()
   productId!: string;
 
-  @ApiProperty({ minimum: 1, maximum: 999 })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'The chosen size. Required for a product with sizes.',
+  })
+  @IsOptional()
+  @IsUUID()
+  variantId?: string;
+
+  @ApiProperty({
+    minimum: 1,
+    maximum: MAX_GRAMS,
+    description: 'Pieces (up to 999), or grams for a product sold by weight.',
+  })
   @IsInt()
   @Min(1)
-  @Max(999)
+  @Max(MAX_GRAMS)
   quantity!: number;
 
   @ApiPropertyOptional()
@@ -107,10 +121,30 @@ export class UpdateOrderItemDto {
   @IsUUID()
   productId?: string;
 
-  @ApiProperty({ minimum: 1, maximum: 999 })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: "A new line's size, for a product with sizes.",
+  })
+  @IsOptional()
+  @IsUUID()
+  variantId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Confirms a customer's weight as it is. Changing a weight confirms it too.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  weighed?: boolean;
+
+  @ApiProperty({
+    minimum: 1,
+    maximum: MAX_GRAMS,
+    description: 'Pieces (up to 999), or grams for a product sold by weight.',
+  })
   @IsInt()
   @Min(1)
-  @Max(999)
+  @Max(MAX_GRAMS)
   quantity!: number;
 
   @ApiPropertyOptional()
@@ -249,14 +283,31 @@ export class OrderItemDto {
   })
   productId!: string | null;
 
-  @ApiProperty()
+  @ApiProperty({ format: 'uuid', type: String, nullable: true })
+  variantId!: string | null;
+
+  @ApiProperty({ description: 'With the size, if one was chosen.' })
   name!: string;
 
-  @ApiProperty({ description: "Whole so'm, as it was when ordered." })
+  @ApiProperty({
+    description: "Whole so'm as it was when ordered, per kilogram for KG.",
+  })
   price!: number;
 
-  @ApiProperty()
+  @ApiProperty({ enum: ProductUnit, enumName: 'ProductUnit' })
+  unit!: ProductUnit;
+
+  @ApiProperty({ description: 'Pieces, or grams for KG.' })
   quantity!: number;
+
+  @ApiProperty({
+    description:
+      "False while a customer's guess at the weight waits for the scales.",
+  })
+  weighed!: boolean;
+
+  @ApiProperty()
+  sendsToKitchen!: boolean;
 
   @ApiProperty({ type: String, nullable: true })
   note!: string | null;

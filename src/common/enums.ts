@@ -42,3 +42,9 @@ export enum ServiceMode {
   /** Customers pay at the counter, watch the screen and collect it themselves. */
   SELF_SERVICE = 'SELF_SERVICE',
 }
+
+/** How a product is counted: by the piece, or weighed with the price per kilogram. */
+export enum ProductUnit {
+  PIECE = 'PIECE',
+  KG = 'KG',
+}

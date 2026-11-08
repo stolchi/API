@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { OrderStatus, OrderType } from '../common/enums.js';
+import { OrderStatus, OrderType, ProductUnit } from '../common/enums.js';
 import { OrderAmountsDto, OrderContentDto } from '../orders/orders.dto.js';
+import { VariantDto } from '../products/products.dto.js';
 
 export class CreatePublicOrderDto extends OrderContentDto {
   @ApiProperty({ enum: [OrderType.DINE_IN, OrderType.TAKEAWAY] })
@@ -74,8 +75,20 @@ export class PublicProductDto {
   @ApiProperty({ type: String, nullable: true })
   description!: string | null;
 
-  @ApiProperty({ description: "Whole so'm." })
+  @ApiProperty({
+    description:
+      "Whole so'm, per kilogram for KG; the cheapest size when there are variants.",
+  })
   price!: number;
+
+  @ApiProperty({ enum: ProductUnit, enumName: 'ProductUnit' })
+  unit!: ProductUnit;
+
+  @ApiProperty({
+    type: [VariantDto],
+    description: 'Empty, or one must be chosen.',
+  })
+  variants!: VariantDto[];
 
   @ApiProperty({ type: String, nullable: true })
   imageUrl!: string | null;
@@ -118,11 +131,19 @@ export class PublicOrderItemDto {
   @ApiProperty()
   name!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Per kilogram for KG.' })
   price!: number;
 
-  @ApiProperty()
+  @ApiProperty({ enum: ProductUnit, enumName: 'ProductUnit' })
+  unit!: ProductUnit;
+
+  @ApiProperty({ description: 'Pieces, or grams for KG.' })
   quantity!: number;
+
+  @ApiProperty({
+    description: 'False until staff weigh it: the price may change.',
+  })
+  weighed!: boolean;
 
   @ApiProperty({ type: String, nullable: true })
   note!: string | null;

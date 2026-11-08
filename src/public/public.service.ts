@@ -39,7 +39,9 @@ function toPublicOrderDto(order: Order): PublicOrderDto {
     items: (order.items ?? []).map((item) => ({
       name: item.nameSnapshot,
       price: item.priceSnapshot,
+      unit: item.unit,
       quantity: item.quantity,
+      weighed: item.weighed,
       note: item.note,
     })),
   };
@@ -103,6 +105,8 @@ export class PublicService {
             name: product.name,
             description: product.description,
             price: product.price,
+            unit: product.unit,
+            variants: product.variants,
             imageUrl: product.imageUrl,
             isAvailable: product.isAvailable,
           })),
