@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Patch,
   Post,
-  Put,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -20,7 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { CurrentCafe, RequireAny } from '../common/auth/decorators.js';
 import { Permission } from '../common/permissions.js';
-import { CafeDto, SetTelegramBotDto, UpdateCafeDto } from './cafes.dto.js';
+import { CafeDto, UpdateCafeDto } from './cafes.dto.js';
 import { CafesService } from './cafes.service.js';
 
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
@@ -67,15 +66,5 @@ export class CafesController {
     @UploadedFile() file: { buffer: Buffer } | undefined,
   ): Promise<CafeDto> {
     return this.cafes.setLogo(cafeId, file);
-  }
-
-  @Put('telegram-bot')
-  @RequireAny(Permission.SETTINGS_MANAGE)
-  @ApiOkResponse({ type: CafeDto })
-  setTelegramBot(
-    @CurrentCafe() cafeId: string,
-    @Body() dto: SetTelegramBotDto,
-  ): Promise<CafeDto> {
-    return this.cafes.setTelegramBot(cafeId, dto.token);
   }
 }

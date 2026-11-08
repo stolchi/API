@@ -21,6 +21,23 @@ export class TelegramBot extends AppBaseEntity {
   @Column({ type: 'varchar', length: 128 })
   webhookSecret!: string;
 
+  /** True once Telegram has the webhook: the bot answers customers. */
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
+
+  /** Where the cafe hears about new orders: the owner's chat, or a staff group. */
+  @Column({ type: 'bigint', nullable: true })
+  notifyChatId!: string | null;
+
+  /** In the link that ties that chat to the cafe: t.me/bot?start=staff_{code}. */
+  @Column({ type: 'varchar', length: 32 })
+  linkCode!: string;
+
+  /** What went wrong the last time the bot was set up, for the settings page. */
+  @Column({ type: 'text', nullable: true })
+  lastError!: string | null;
+
+  /** The business day the last daily summary was sent for. */
+  @Column({ type: 'date', nullable: true })
+  lastSummaryOn!: string | null;
 }

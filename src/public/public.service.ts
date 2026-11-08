@@ -27,7 +27,7 @@ const { ACCEPTED, COOKING, READY } = OrderStatus;
 /** Long enough for any real order; numbers restart daily, so yesterday's must drop off. */
 const SCREEN_WINDOW_MS = 12 * 60 * 60 * 1000;
 
-function toPublicOrderDto(order: Order): PublicOrderDto {
+export function toPublicOrderDto(order: Order): PublicOrderDto {
   return {
     publicToken: order.publicToken,
     number: order.number,

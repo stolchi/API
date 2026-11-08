@@ -90,8 +90,27 @@ export class TelegramBotStatusDto {
   })
   username!: string | null;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Telegram has the webhook: the bot answers.' })
   isActive!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      "Why the bot is not working: Telegram's words, or NEEDS_HTTPS when the API has no public https address.",
+  })
+  error!: string | null;
+
+  @ApiProperty({ description: 'A chat gets new orders and the daily summary.' })
+  notificationsLinked!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Opening this in Telegram ties that chat (or group) to the cafe.',
+  })
+  linkUrl!: string | null;
 }
 
 export class CafeDto {
@@ -220,13 +239,4 @@ export class UpdateCafeDto {
   @Min(0)
   @Max(MAX_MONEY)
   deliveryFee?: number;
-}
-
-export class SetTelegramBotDto {
-  @ApiProperty({ description: 'The token from @BotFather. Stored encrypted.' })
-  @IsString()
-  @Matches(/^\d{5,20}:[A-Za-z0-9_-]{30,64}$/, {
-    message: 'token does not look like a Telegram bot token',
-  })
-  token!: string;
 }

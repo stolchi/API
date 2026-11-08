@@ -17,6 +17,7 @@ import { PublicModule } from './public/public.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { StaffModule } from './staff/staff.module.js';
 import { TablesModule } from './tables/tables.module.js';
+import { TelegramModule } from './telegram/telegram.module.js';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { TablesModule } from './tables/tables.module.js';
     StaffModule,
     PublicModule,
     DashboardModule,
+    TelegramModule,
   ],
   controllers: [AppController],
   providers: [

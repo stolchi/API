@@ -34,6 +34,7 @@ import type { TenantEntity } from '../database/entities/tenant.entity.js';
 import { RealtimeGateway } from '../realtime/realtime.gateway.js';
 import { chargesFor, totalsOf } from './charges.js';
 import { itemsTotalOf, maxQuantityOf } from './order-lines.js';
+import { OrderEvents } from './order-events.js';
 import { displayNumberOf } from './order-number.js';
 import { canTransition, maySetStatus } from './order-status.js';
 import type {
@@ -54,6 +55,8 @@ export interface CreateOrderInput {
   customerPhone?: string;
   address?: string;
   location?: { latitude: number; longitude: number };
+  /** The customer's Telegram user, who is told about the order in the bot. */
+  telegramUserId?: string;
   createdById?: string;
 }
 
@@ -145,6 +148,7 @@ export class OrdersService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly realtime: RealtimeGateway,
+    private readonly events: OrderEvents,
   ) {}
 
   async create(cafeId: string, input: CreateOrderInput): Promise<Order> {
@@ -199,6 +203,7 @@ export class OrdersService {
             latitude: input.location.latitude,
             longitude: input.location.longitude,
           }),
+        telegramUserId: input.telegramUserId ?? null,
         createdById: input.createdById ?? null,
       });
       await manager.insert(
@@ -211,6 +216,7 @@ export class OrdersService {
     // Announced only after the commit: nobody hears about an order that rolled back.
     const order = await this.load(this.dataSource.manager, cafeId, orderId);
     this.realtime.emitOrderCreated(cafeId, toOrderDto(order));
+    this.events.emit({ kind: 'created', order });
     return order;
   }
 
@@ -274,8 +280,10 @@ export class OrdersService {
       throw new ForbiddenException(`Your role cannot set an order to ${to}`);
     }
 
+    let from = to;
     await this.dataSource.transaction(async (manager) => {
       const order = await this.lock(manager, cafeId, id);
+      from = order.status;
       if (!canTransition(order.status, to)) {
         throw new ConflictException(
           `An order cannot go from ${order.status} to ${to}`,
@@ -319,6 +327,7 @@ export class OrdersService {
       status: order.status,
     });
     if (to === OrderStatus.CANCELLED) this.realtime.emitOrderChanged(order.id);
+    this.events.emit({ kind: 'status', order, from });
     return order;
   }
 
@@ -531,6 +540,10 @@ export class OrdersService {
     if (added > 0) this.realtime.emitOrderItemsAdded(cafeId, dto);
     // The customer is told what they will now get, and for how much.
     this.realtime.emitOrderChanged(order.id);
+    this.events.emit({ kind: 'changed', order });
+    if (order.status !== before) {
+      this.events.emit({ kind: 'status', order, from: before });
+    }
     return order;
   }
 

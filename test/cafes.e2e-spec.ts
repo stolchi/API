@@ -1,12 +1,6 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { DataSource } from 'typeorm';
 import { Role } from '../src/common/enums.js';
-import {
-  decryptSecret,
-  parseSecretKey,
-} from '../src/common/crypto/secret-box.js';
-import { TelegramBot } from '../src/database/entities/index.js';
 import {
   API,
   createCatalog,
@@ -140,47 +134,6 @@ describe('Cafe settings (e2e)', () => {
         contentType: 'image/png',
       })
       .expect(400);
-  });
-
-  describe('Telegram bot token', () => {
-    const botOf = (cafeId: string) =>
-      app.get(DataSource).manager.findOneBy(TelegramBot, { cafeId });
-
-    it('is stored encrypted and never returned', async () => {
-      const { body } = await as(cafeA.token)
-        .put('/cafes/current/telegram-bot')
-        .send({ token: BOT_TOKEN })
-        .expect(200);
-      expect(body.telegramBot).toEqual({ username: null, isActive: false });
-      expect(JSON.stringify(body)).not.toContain(BOT_TOKEN);
-
-      const bot = await botOf(cafeA.cafeId);
-      expect(bot?.tokenEncrypted).not.toContain(BOT_TOKEN);
-      const key = parseSecretKey(process.env.TELEGRAM_TOKEN_KEY ?? '');
-      expect(decryptSecret(bot?.tokenEncrypted ?? '', key)).toBe(BOT_TOKEN);
-      expect(await botOf(cafeB.cafeId)).toBeNull();
-    });
-
-    it('replaces the token but keeps the webhook secret', async () => {
-      const path = '/cafes/current/telegram-bot';
-      await as(cafeA.token).put(path).send({ token: BOT_TOKEN }).expect(200);
-      const first = await botOf(cafeA.cafeId);
-      await as(cafeA.token)
-        .put(path)
-        .send({ token: `${BOT_TOKEN}9` })
-        .expect(200);
-      const second = await botOf(cafeA.cafeId);
-      expect(second?.id).toBe(first?.id);
-      expect(second?.webhookSecret).toBe(first?.webhookSecret);
-      expect(second?.tokenEncrypted).not.toBe(first?.tokenEncrypted);
-    });
-
-    it('refuses something that is not a bot token', async () => {
-      await as(cafeA.token)
-        .put('/cafes/current/telegram-bot')
-        .send({ token: 'not-a-token' })
-        .expect(400);
-    });
   });
 
   it('lets the kitchen read table names, but not change tables', async () => {

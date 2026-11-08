@@ -4,6 +4,8 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import * as argon2 from 'argon2';
 import { DataSource } from 'typeorm';
+import { TelegramApi } from '../src/telegram/telegram-api.js';
+import { FakeTelegramApi } from './fake-telegram.js';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import type { Role } from '../src/common/enums.js';
@@ -17,7 +19,11 @@ export async function createTestApp(): Promise<NestExpressApplication> {
   loadEnvFile();
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    // Tests never reach the real Telegram.
+    .overrideProvider(TelegramApi)
+    .useValue(new FakeTelegramApi())
+    .compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app);
   await app.init();

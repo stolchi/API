@@ -10,5 +10,6 @@ import { CafesService } from './cafes.service.js';
   imports: [TypeOrmModule.forFeature([Cafe, TelegramBot]), StorageModule],
   controllers: [CafesController],
   providers: [CafesService],
+  exports: [CafesService],
 })
 export class CafesModule {}

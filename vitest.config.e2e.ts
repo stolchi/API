@@ -13,6 +13,8 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       DATABASE_NAME: 'stolchi_test',
+      PUBLIC_API_URL: 'https://api.stolchi.test',
+      MENU_APP_URL: 'https://menu.stolchi.test',
       UPLOAD_DIR: join(tmpdir(), 'stolchi-test-uploads'),
     },
   },
