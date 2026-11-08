@@ -52,6 +52,8 @@ export interface CreateOrderInput {
   note?: string;
   customerName?: string;
   customerPhone?: string;
+  address?: string;
+  location?: { latitude: number; longitude: number };
   createdById?: string;
 }
 
@@ -104,6 +106,12 @@ export function toOrderDto(order: Order): OrderDto {
     tableId: order.tableId,
     customerName: order.customerName,
     customerPhone: order.customerPhone,
+    address: order.address,
+    location:
+      order.latitude === null || order.longitude === null
+        ? null
+        : { latitude: order.latitude, longitude: order.longitude },
+    cancelReason: order.cancelReason,
     ...amountsOf(order),
     paidAmount: paidAmountOf(order),
     note: order.note,
@@ -183,6 +191,14 @@ export class OrdersService {
         note: input.note ?? null,
         customerName: input.customerName ?? null,
         customerPhone: input.customerPhone ?? null,
+        // Only a delivery goes anywhere.
+        address:
+          input.type === OrderType.DELIVERY ? (input.address ?? null) : null,
+        ...(input.type === OrderType.DELIVERY &&
+          input.location && {
+            latitude: input.location.latitude,
+            longitude: input.location.longitude,
+          }),
         createdById: input.createdById ?? null,
       });
       await manager.insert(
@@ -250,6 +266,8 @@ export class OrdersService {
     id: string,
     to: OrderStatus,
     permissions: readonly Permission[],
+    /** Why it is cancelled, for the customer. */
+    reason?: string,
   ): Promise<Order> {
     // Nothing ever goes back to NEW: that is a conflict below, whoever is asking.
     if (to !== OrderStatus.NEW && !maySetStatus(permissions, to)) {
@@ -280,7 +298,15 @@ export class OrdersService {
           'An order with payments can only be cancelled by someone who takes payments',
         );
       }
-      await this.scope(manager, cafeId, Order).update({ id }, { status: to });
+      await this.scope(manager, cafeId, Order).update(
+        { id },
+        {
+          status: to,
+          ...(to === OrderStatus.CANCELLED && {
+            cancelReason: reason || null,
+          }),
+        },
+      );
       if (to === OrderStatus.READY) {
         await manager.update(OrderItem, { orderId: id }, { addedQuantity: 0 });
       }
@@ -292,6 +318,68 @@ export class OrdersService {
       number: order.number,
       status: order.status,
     });
+    if (to === OrderStatus.CANCELLED) this.realtime.emitOrderChanged(order.id);
+    return order;
+  }
+
+  /** The customer's details, as clarified on the phone. */
+  async updateCustomer(
+    cafeId: string,
+    id: string,
+    change: {
+      customerName?: string | null;
+      customerPhone?: string | null;
+      address?: string | null;
+      location?: { latitude: number; longitude: number } | null;
+    },
+  ): Promise<Order> {
+    await this.dataSource.transaction(async (manager) => {
+      const order = await this.lock(manager, cafeId, id);
+      if (
+        order.status === OrderStatus.PAID ||
+        order.status === OrderStatus.CANCELLED
+      ) {
+        throw new ConflictException(
+          `A ${order.status} order cannot be changed`,
+        );
+      }
+      const next = {
+        customerName:
+          change.customerName === undefined
+            ? order.customerName
+            : change.customerName || null,
+        customerPhone:
+          change.customerPhone === undefined
+            ? order.customerPhone
+            : change.customerPhone || null,
+        address:
+          change.address === undefined ? order.address : change.address || null,
+        latitude:
+          change.location === undefined
+            ? order.latitude
+            : (change.location?.latitude ?? null),
+        longitude:
+          change.location === undefined
+            ? order.longitude
+            : (change.location?.longitude ?? null),
+      };
+      if (order.type === OrderType.DELIVERY) {
+        if (!next.customerPhone || !next.address) {
+          throw new BadRequestException(
+            'A DELIVERY order needs a customer phone and an address',
+          );
+        }
+      } else if (next.address || next.latitude !== null) {
+        throw new BadRequestException(
+          'Only a DELIVERY order has an address or a location',
+        );
+      }
+      await this.scope(manager, cafeId, Order).update({ id }, next);
+    });
+
+    const order = await this.load(this.dataSource.manager, cafeId, id);
+    this.realtime.emitOrderUpdated(cafeId, toOrderDto(order));
+    this.realtime.emitOrderChanged(order.id);
     return order;
   }
 
@@ -441,6 +529,8 @@ export class OrdersService {
       });
     }
     if (added > 0) this.realtime.emitOrderItemsAdded(cafeId, dto);
+    // The customer is told what they will now get, and for how much.
+    this.realtime.emitOrderChanged(order.id);
     return order;
   }
 
@@ -511,15 +601,22 @@ export class OrdersService {
     return order;
   }
 
-  private assertTypeRules({ type, tableId, customerPhone }: CreateOrderInput) {
+  private assertTypeRules({
+    type,
+    tableId,
+    customerPhone,
+    address,
+  }: CreateOrderInput) {
     if (type === OrderType.DINE_IN && !tableId) {
       throw new BadRequestException('A DINE_IN order needs a table');
     }
     if (type !== OrderType.DINE_IN && tableId) {
       throw new BadRequestException('Only a DINE_IN order can have a table');
     }
-    if (type === OrderType.DELIVERY && !customerPhone) {
-      throw new BadRequestException('A DELIVERY order needs a customer phone');
+    if (type === OrderType.DELIVERY && (!customerPhone || !address)) {
+      throw new BadRequestException(
+        'A DELIVERY order needs a customer phone and an address',
+      );
     }
   }
 

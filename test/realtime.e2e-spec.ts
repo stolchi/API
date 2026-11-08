@@ -300,6 +300,25 @@ describe('Realtime (e2e)', () => {
       });
     });
 
+    it('are told, without data, when their order is changed or cancelled', async () => {
+      const { body: order } = await createOrder();
+      const socket = await connect({ orderToken: order.publicToken });
+
+      const edited = next(socket, 'order.changed');
+      await request(app.getHttpServer())
+        .put(`${API}/orders/${order.id}/items`)
+        .set('Authorization', `Bearer ${cafeA.token}`)
+        .send({ items: [{ id: order.items[0].id, quantity: 2 }] })
+        .expect(200);
+      expect(await edited).toBeUndefined();
+
+      const cancelled = next(socket, 'order.changed');
+      await staff('post', `/orders/${order.id}/cancel`)
+        .send({ reason: 'Osh tugadi' })
+        .expect(200);
+      expect(await cancelled).toBeUndefined();
+    });
+
     it('hear nothing about other orders or other staff events', async () => {
       const { body: mine } = await createOrder();
       const { body: other } = await createOrder();

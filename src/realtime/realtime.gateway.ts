@@ -67,6 +67,14 @@ export class RealtimeGateway implements OnGatewayInit {
     this.notifyScreen(cafeId);
   }
 
+  /**
+   * The order's contents, details or cancellation changed: the customer's page reads it
+   * again. No data, because what the customer may see comes from the public endpoint.
+   */
+  emitOrderChanged(orderId: string): void {
+    this.server.to(orderRoom(orderId)).emit('order.changed');
+  }
+
   /** Lets the kitchen know to look again at an order it may already have finished. */
   emitOrderItemsAdded(cafeId: string, order: unknown): void {
     this.toStaff(cafeId).emit('order.items_added', order);

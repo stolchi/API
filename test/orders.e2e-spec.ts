@@ -307,6 +307,7 @@ describe('Orders (e2e)', () => {
           source: OrderSource.TELEGRAM,
           type: OrderType.DELIVERY,
           customerPhone: '+998901234567',
+          address: 'Chilonzor 9',
           items: [{ productId: a.choy.id, quantity: 1 }],
         });
       expect(status).toBe('NEW');

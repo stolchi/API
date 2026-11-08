@@ -8,6 +8,8 @@ import {
   IsEnum,
   IsInt,
   IsISO8601,
+  IsLatitude,
+  IsLongitude,
   IsOptional,
   IsString,
   IsUUID,
@@ -61,6 +63,17 @@ export class CreateOrderItemDto {
   note?: string;
 }
 
+/** A point on the map. */
+export class LocationDto {
+  @ApiProperty({ example: 41.311081, minimum: -90, maximum: 90 })
+  @IsLatitude()
+  latitude!: number;
+
+  @ApiProperty({ example: 69.240562, minimum: -180, maximum: 180 })
+  @IsLongitude()
+  longitude!: number;
+}
+
 /** What both the POS and the public QR menu send. Prices always come from the database. */
 export class OrderContentDto {
   @ApiProperty({ type: [CreateOrderItemDto] })
@@ -87,6 +100,26 @@ export class OrderContentDto {
   @IsOptional()
   @Matches(PHONE_PATTERN, { message: PHONE_MESSAGE })
   customerPhone?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 500,
+    description: 'Where to deliver, with a landmark. Required for DELIVERY.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(500)
+  address?: string;
+  @ApiPropertyOptional({
+    type: LocationDto,
+    description: 'Where to deliver, on the map. Only for DELIVERY.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocationDto)
+  location?: LocationDto;
 }
 
 export class CreateOrderDto extends OrderContentDto {
@@ -235,6 +268,60 @@ export class MoveOrderDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
   tableId!: string;
+}
+
+export class CancelOrderDto {
+  @ApiPropertyOptional({
+    maxLength: 300,
+    example: 'Baliq tugagan',
+    description: 'Told to the customer.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
+
+/** Contact details, as clarified on the phone. A field left out stays as it is. */
+export class UpdateOrderCustomerDto {
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: 120 })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(120)
+  customerName?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: '+998901234567',
+  })
+  @IsOptional()
+  @Matches(PHONE_PATTERN, { message: PHONE_MESSAGE })
+  customerPhone?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: 500 })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(500)
+  address?: string | null;
+  @ApiPropertyOptional({
+    type: LocationDto,
+    nullable: true,
+    description: 'The delivery point; null takes it off.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LocationDto)
+  location?: LocationDto | null;
 }
 
 export class ChangeStatusDto {
@@ -387,6 +474,15 @@ export class OrderDto extends OrderAmountsDto {
 
   @ApiProperty({ type: String, nullable: true })
   customerPhone!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  address!: string | null;
+
+  @ApiProperty({ type: LocationDto, nullable: true })
+  location!: LocationDto | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  cancelReason!: string | null;
 
   @ApiProperty()
   paidAmount!: number;

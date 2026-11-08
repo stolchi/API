@@ -161,6 +161,7 @@ describe('Order settings and charges (e2e)', () => {
       .send({
         type: 'DELIVERY',
         customerPhone: '+998901112233',
+        address: 'Chilonzor 9',
         items: [{ productId: a.choy.id, quantity: 1 }],
       })
       .expect(201);
@@ -187,6 +188,7 @@ describe('Order settings and charges (e2e)', () => {
       .send({
         type: 'DELIVERY',
         customerPhone: '+998901112233',
+        address: 'Chilonzor 9',
         items: [{ productId: a.osh.id, quantity: 1 }],
       })
       .expect(409);

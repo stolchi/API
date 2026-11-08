@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, MoreThan, Repository } from 'typeorm';
+import { In, MoreThan, Not, Repository } from 'typeorm';
 import { OrderSource, OrderStatus, OrderType } from '../common/enums.js';
 import { TenantRepository } from '../common/tenancy/tenant-repository.js';
 import { CafeTable } from '../database/entities/cafe-table.entity.js';
@@ -22,7 +22,7 @@ import type {
   PublicTableDto,
 } from './public.dto.js';
 
-const { NEW, ACCEPTED, COOKING, READY } = OrderStatus;
+const { ACCEPTED, COOKING, READY } = OrderStatus;
 
 /** Long enough for any real order; numbers restart daily, so yesterday's must drop off. */
 const SCREEN_WINDOW_MS = 12 * 60 * 60 * 1000;
@@ -34,6 +34,7 @@ function toPublicOrderDto(order: Order): PublicOrderDto {
     displayNumber: displayNumberOf(order),
     status: order.status,
     type: order.type,
+    cancelReason: order.cancelReason,
     ...amountsOf(order),
     createdAt: order.createdAt,
     items: (order.items ?? []).map((item) => ({
@@ -118,8 +119,10 @@ export class PublicService {
     const cafe = await this.cafeBySlug(slug);
     const orders = await this.tenantOrders.forCafe(cafe.id).find({
       select: { number: true, source: true, status: true },
+      // A delivery is not collected at the counter, so it stays off the screen.
       where: {
-        status: In([NEW, ACCEPTED, COOKING, READY]),
+        status: In([ACCEPTED, COOKING, READY]),
+        type: Not(OrderType.DELIVERY),
         createdAt: MoreThan(new Date(Date.now() - SCREEN_WINDOW_MS)),
       },
       order: { createdAt: 'ASC' },

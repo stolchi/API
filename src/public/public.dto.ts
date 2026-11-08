@@ -169,6 +169,13 @@ export class PublicOrderDto extends OrderAmountsDto {
   @ApiProperty({ enum: OrderType, enumName: 'OrderType' })
   type!: OrderType;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Why it was cancelled.',
+  })
+  cancelReason!: string | null;
+
   @ApiProperty()
   createdAt!: Date;
 

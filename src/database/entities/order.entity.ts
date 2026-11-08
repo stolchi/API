@@ -20,6 +20,10 @@ import { User } from './user.entity.js';
 @Index(['cafeId', 'businessDate', 'number'], { unique: true })
 @Index(['cafeId', 'status'])
 @Check('CHK_orders_total_not_negative', `"total" >= 0`)
+@Check(
+  'CHK_orders_location_whole',
+  `("latitude" IS NULL) = ("longitude" IS NULL)`,
+)
 export class Order extends TenantEntity {
   /** Restarts from 1 for each cafe on each `businessDate`. */
   @Column({ type: 'integer' })
@@ -50,6 +54,21 @@ export class Order extends TenantEntity {
 
   @Column({ type: 'varchar', length: 20, nullable: true })
   customerPhone!: string | null;
+
+  /** Where a delivery goes, with any landmark. Required for DELIVERY. */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  address!: string | null;
+
+  /** The delivery point on a map, so a courier can be routed there. Both or neither. */
+  @Column({ type: 'double precision', nullable: true })
+  latitude!: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  longitude!: number | null;
+
+  /** Why it was cancelled, told to the customer. */
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  cancelReason!: string | null;
 
   /** Telegram ids exceed 32 bits; pg returns bigint as a string. */
   @Column({ type: 'bigint', nullable: true })

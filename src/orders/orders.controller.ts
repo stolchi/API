@@ -29,12 +29,14 @@ import { Permission } from '../common/permissions.js';
 import {
   AddPaymentDto,
   AddPaymentsDto,
+  CancelOrderDto,
   ChangeStatusDto,
   CreateOrderDto,
   ListOrdersQueryDto,
   MoveOrderDto,
   OrderDto,
   OrderPageDto,
+  UpdateOrderCustomerDto,
   UpdateOrderItemsDto,
 } from './orders.dto.js';
 import { OrdersService, toOrderDto } from './orders.service.js';
@@ -127,6 +129,7 @@ export class OrdersController {
     @CurrentCafe() cafeId: string,
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelOrderDto,
   ): Promise<OrderDto> {
     return toOrderDto(
       await this.orders.changeStatus(
@@ -134,8 +137,21 @@ export class OrdersController {
         id,
         OrderStatus.CANCELLED,
         user.permissions,
+        dto.reason,
       ),
     );
+  }
+
+  @Patch(':id/customer')
+  @RequireAny(Permission.ORDERS_EDIT)
+  @ApiOperation({ summary: "Change the customer's name, phone or address" })
+  @ApiOkResponse({ type: OrderDto })
+  async updateCustomer(
+    @CurrentCafe() cafeId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateOrderCustomerDto,
+  ): Promise<OrderDto> {
+    return toOrderDto(await this.orders.updateCustomer(cafeId, id, dto));
   }
 
   @Post(':id/payments')
